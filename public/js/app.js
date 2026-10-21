@@ -459,7 +459,11 @@ function renderHealthAndBlockers() {
 
   if (healthContainer && state.health?.projects) {
     healthContainer.innerHTML = state.health.projects.map(hp => {
-      const statusClass = hp.healthStatus === 'Healthy' ? 'health-healthy' : (hp.healthStatus === 'At Risk' ? 'health-risk' : 'health-attention');
+      const statusClass = hp.healthStatus === 'Healthy'
+        ? 'health-healthy'
+        : (hp.healthStatus === 'At Risk'
+          ? 'health-risk'
+          : (hp.healthStatus === 'Insufficient Data' ? 'health-insufficient' : 'health-attention'));
       return `
         <div class="health-project-row">
           <div>

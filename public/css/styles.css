@@ -902,6 +902,7 @@ body {
 .health-healthy { background: var(--color-success-light); color: var(--color-success); }
 .health-attention { background: var(--color-warning-light); color: var(--color-warning); }
 .health-risk { background: var(--color-danger-light); color: var(--color-danger); }
+.health-insufficient { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
 
 /* Maintenance View */
 .maintenance-grid {

@@ -525,27 +525,64 @@ You can ask me to:
 
     const health = detailsRes.data?.health;
     const blockers = detailsRes.data?.blockers || [];
+    const metrics = health?.metrics || {};
+    const evidence = health?.evidence || {};
+    const completeness = evidence.dataCompleteness || { percentage: 0, rating: 'Unknown', missingFields: [], summary: 'N/A' };
 
-    let explanation = `### Project Health Report: ${p.name} (${p.category || 'General'})\n`;
-    explanation += `• **Project ID:** \`${p.id}\`\n`;
-    explanation += `• **Status:** ${(p.status || 'active').toUpperCase()} | **Priority:** ${(p.priority || 'medium').toUpperCase()} | **Tech Stack:** ${Array.isArray(p.techStack) && p.techStack.length ? p.techStack.join(', ') : 'Not specified'}\n`;
-    explanation += `• **Repository:** ${p.repoUrl || 'Not specified'}\n`;
+    let explanation = `### Project Health & Intelligence Report: ${p.name} (${p.category || 'General'})\n`;
+    explanation += `• **Project ID:** \`${p.id}\`\n\n`;
+
+    explanation += `#### 1. Registered Metadata [Verified from project records]\n`;
+    explanation += `• **Status:** ${(p.status || 'active').toUpperCase()} | **Priority:** ${(p.priority || 'medium').toUpperCase()} | **Category:** ${p.category || 'Not specified'}\n`;
+    explanation += `• **Technology Stack:** ${Array.isArray(p.techStack) && p.techStack.length ? p.techStack.join(', ') : 'Not registered'}\n`;
+    explanation += `• **Description:** ${p.description ? p.description : 'None registered'}\n`;
+    explanation += `• **Repository:** ${p.repoUrl ? `${p.repoUrl} [Registered remote URL]` : 'None registered [Repository not connected]'}\n`;
+    explanation += `• **Last Record Update:** ${p.updatedAt ? new Date(p.updatedAt).toISOString() : (p.createdAt ? new Date(p.createdAt).toISOString() : 'Not available')}\n\n`;
+
+    explanation += `#### 2. Project Health & Derived Metrics [Calculated from registered tasks]\n`;
     explanation += `• **Derived Health:** **${health?.healthStatus || 'Unknown'}**\n`;
     if (health?.statusReasons?.length) {
-      explanation += `  *Reasons:* ${health.statusReasons.join('; ')}\n`;
+      explanation += `  *Health Assessment:* ${health.statusReasons.join('; ')}\n`;
     }
+    explanation += `• **Task Progress:** ${metrics.taskProgress || (metrics.totalTasks === 0 ? 'No task data' : `${metrics.completionRate}%`)}\n`;
 
     explanation += `\n**Task Metrics:**\n`;
-    explanation += `• Total Tasks: ${health?.metrics?.totalTasks || 0} (${health?.metrics?.completedCount || 0} completed, ${health?.metrics?.completionRate || 0}% progress)\n`;
-    explanation += `• Incomplete Work: ${health?.metrics?.incompleteCount || 0} task(s)\n`;
-    explanation += `• User-Reported Bugs: ${health?.metrics?.userRecordedBugs?.length || 0}\n`;
+    explanation += `• Total Tasks: ${metrics.totalTasks || 0} (${metrics.completedCount || 0} completed, ${metrics.completionRate || 0}% progress)\n`;
+    explanation += `• Incomplete Work: ${metrics.incompleteCount || 0} task(s)\n`;
+    explanation += `• Overdue Work: ${metrics.overdueCount || 0} task(s) past deadline\n`;
+    explanation += `• User-Reported Bugs: ${metrics.userRecordedBugs?.length || 0}\n`;
     explanation += `• Active Blockers: ${blockers.length}\n`;
+    explanation += `• Maintenance Items: ${metrics.maintenanceCount || 0} task(s)\n`;
 
     if (blockers.length > 0) {
       explanation += `\n**Active Blockers Detail:**\n`;
       blockers.forEach(b => {
         explanation += `  - 🛑 *${b.taskTitle}*: ${b.blockerReason}\n`;
       });
+    }
+
+    if (metrics.overdueTasks?.length > 0) {
+      explanation += `\n**Overdue Work Detail:**\n`;
+      metrics.overdueTasks.forEach(o => {
+        explanation += `  - ⚠️ *${o.title}* (${o.priority}) - Due: ${o.dueDate} (${o.daysOverdue} day(s) overdue)\n`;
+      });
+    }
+
+    explanation += `\n#### 3. Evidence Audit & Unknowns\n`;
+    explanation += `• **Source Code Inspection:** [Source code not inspected] No static analysis or codebase scanner connected.\n`;
+    explanation += `• **Repository Status:** ${p.repoUrl ? `[Repository registered] (${p.repoUrl}) - remote git commits and tests have not been executed.` : `[Repository not connected]`}\n`;
+    explanation += `• **Test & Runtime Verification:** [Unverified] No automated test suite executed by this system.\n`;
+    explanation += `• **Data Completeness:** ${completeness.percentage}% (${completeness.summary})\n`;
+    if (completeness.missingFields?.length > 0) {
+      explanation += `• **Missing Project Records:** ${completeness.missingFields.join(', ')}\n`;
+    } else {
+      explanation += `• **Missing Project Records:** None (all core metadata registered)\n`;
+    }
+
+    if (metrics.totalTasks === 0) {
+      explanation += `\n> ⚠️ **[Insufficient data]** *This project has no registered tasks. A lack of recorded bugs or blockers does NOT indicate that the software is bug-free or production-ready.*`;
+    } else {
+      explanation += `\n> ℹ️ *Note: Health and metrics are derived strictly from user-recorded tasks. Zero recorded bugs indicates absence of logged records, not proof that the codebase is bug-free.*`;
     }
 
     return {
