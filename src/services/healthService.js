@@ -1,8 +1,8 @@
 /**
  * ProjectPilot AI - Project Health Service
  * Derives truthful health metrics strictly from persisted records.
- * Distinguishes user bugs, incomplete tasks, explicit blockers, overdue work,
- * and clearly audits evidence vs unverified claims.
+ * Distinguishes user bugs, incomplete tasks, critical vs non-critical blockers,
+ * overdue work, and clearly audits evidence vs unverified claims.
  */
 
 export class HealthService {
@@ -62,12 +62,30 @@ export class HealthService {
     const totalTasks = tasks.length;
     const completedTasks = tasks.filter(t => t.status === 'done');
     const incompleteTasks = tasks.filter(t => t.status !== 'done');
-    const explicitBlockers = tasks.filter(t => t.status === 'blocked' || Boolean(t.blocker));
+
+    // Active blockers: tasks that are explicitly blocked or have an unresolved blocker description
+    const explicitBlockers = tasks.filter(t => {
+      if (t.blockerResolved === true) return false;
+      if (t.blocker && String(t.blocker).trim().toLowerCase() === 'resolved') return false;
+      if (t.status === 'blocked') return true;
+      if (Boolean(t.blocker)) return true;
+      return false;
+    });
+
+    // Blocker severity classification
+    const criticalBlockers = explicitBlockers.filter(b => b.priority === 'critical' || b.priority === 'high');
+    const nonCriticalBlockers = explicitBlockers.filter(b => b.priority !== 'critical' && b.priority !== 'high');
+
+    // User-recorded bug classification
     const userRecordedBugs = tasks.filter(t => t.isBug === true);
     const openBugs = userRecordedBugs.filter(b => b.status !== 'done');
     const criticalBugs = openBugs.filter(b => b.priority === 'critical');
+    const nonCriticalBugs = openBugs.filter(b => b.priority !== 'critical');
+
+    // Maintenance tasks
     const maintenanceTasks = tasks.filter(t => t.isMaintenance === true);
 
+    // Overdue work classification (completed tasks are never overdue)
     const now = new Date();
     const overdueTasks = tasks.filter(t => {
       if (!t.dueDate || t.status === 'done') return false;
@@ -75,6 +93,7 @@ export class HealthService {
       return !isNaN(due.getTime()) && due < now;
     });
     const overdueCriticalOrHigh = overdueTasks.filter(t => t.priority === 'critical' || t.priority === 'high');
+    const overdueNormal = overdueTasks.filter(t => t.priority !== 'critical' && t.priority !== 'high');
 
     const completionRate = totalTasks > 0
       ? Math.round((completedTasks.length / totalTasks) * 100)
@@ -84,7 +103,7 @@ export class HealthService {
       ? 'No task data'
       : `${completionRate}% (${completedTasks.length}/${totalTasks} completed)`;
 
-    // Transparent health model
+    // Transparent health model precedence
     let healthStatus = 'Healthy';
     const statusReasons = [];
 
@@ -93,10 +112,10 @@ export class HealthService {
       healthStatus = 'Insufficient Data';
       statusReasons.push('No registered tasks are available to evaluate progress.');
     } else {
-      // Rule 2: Active blockers indicate At Risk
-      if (explicitBlockers.length > 0) {
+      // Rule 2: Active critical blockers indicate At Risk (even if completion is high)
+      if (criticalBlockers.length > 0) {
         healthStatus = 'At Risk';
-        statusReasons.push(`${explicitBlockers.length} active blocker(s) recorded`);
+        statusReasons.push(`${criticalBlockers.length} active blocker(s) recorded (critical/high priority)`);
       }
 
       // Rule 3: Critical open bugs indicate At Risk
@@ -105,32 +124,45 @@ export class HealthService {
         statusReasons.push(`${criticalBugs.length} critical user-recorded bug(s) open`);
       }
 
-      // Rule 4: Overdue critical or high tasks indicate At Risk; others indicate Attention Needed
+      // Rule 4: Overdue critical or high tasks indicate At Risk
       if (overdueCriticalOrHigh.length > 0) {
         healthStatus = 'At Risk';
         statusReasons.push(`${overdueTasks.length} overdue task(s) past deadline (${overdueCriticalOrHigh.length} critical/high priority)`);
-      } else if (overdueTasks.length > 0) {
+      }
+
+      // Rule 5: Active non-critical blockers indicate Attention Needed (unless already At Risk)
+      if (nonCriticalBlockers.length > 0) {
         if (healthStatus !== 'At Risk') {
           healthStatus = 'Attention Needed';
         }
-        statusReasons.push(`${overdueTasks.length} overdue task(s) past deadline`);
+        statusReasons.push(`${nonCriticalBlockers.length} active non-critical blocker(s) recorded`);
       }
 
-      // Rule 5: Non-critical open bugs indicate Attention Needed
-      if (openBugs.length > 0 && criticalBugs.length === 0) {
+      // Rule 6: Non-critical open bugs indicate Attention Needed (unless already At Risk)
+      if (nonCriticalBugs.length > 0) {
         if (healthStatus !== 'At Risk') {
           healthStatus = 'Attention Needed';
         }
-        statusReasons.push(`${openBugs.length} user-recorded bug(s) pending resolution`);
+        statusReasons.push(`${nonCriticalBugs.length} user-recorded bug(s) pending resolution`);
       }
 
-      // Rule 6: Incomplete tasks with completion < 50% indicate Attention Needed
-      if (healthStatus === 'Healthy' && completionRate < 50) {
-        healthStatus = 'Attention Needed';
+      // Rule 7: Ordinary overdue tasks indicate Attention Needed (unless already At Risk)
+      if (overdueNormal.length > 0) {
+        if (healthStatus !== 'At Risk') {
+          healthStatus = 'Attention Needed';
+        }
+        statusReasons.push(`${overdueNormal.length} overdue task(s) past deadline`);
+      }
+
+      // Rule 8: Incomplete tasks with completion < 50% indicate Attention Needed (unless already At Risk)
+      if (completionRate < 50) {
+        if (healthStatus !== 'At Risk') {
+          healthStatus = 'Attention Needed';
+        }
         statusReasons.push(`Completion rate is ${completionRate}% with ${incompleteTasks.length} pending task(s)`);
       }
 
-      // Rule 7: Healthy if no negative conditions
+      // Rule 9: Healthy if no negative conditions
       if (statusReasons.length === 0) {
         statusReasons.push('All recorded tasks proceeding with no open blockers or overdue deadlines');
       }
@@ -163,23 +195,29 @@ export class HealthService {
           taskId: b.id,
           title: b.title,
           priority: b.priority,
+          isCritical: b.priority === 'critical' || b.priority === 'high',
           blockerDescription: b.blocker || 'Status set to blocked without details'
         })),
+        criticalBlockerCount: criticalBlockers.length,
+        nonCriticalBlockerCount: nonCriticalBlockers.length,
         userRecordedBugs: userRecordedBugs.map(b => ({
           taskId: b.id,
           title: b.title,
           status: b.status,
-          priority: b.priority
+          priority: b.priority,
+          isCritical: b.priority === 'critical'
         })),
+        criticalBugCount: criticalBugs.length,
         maintenanceCount: maintenanceTasks.length
       },
       evidence: {
         sourceInspectionStatus: 'Source code not inspected (no repository analyzer connected)',
         repositoryStatus: project.repoUrl
-          ? `Registered remote URL (${project.repoUrl}) - external commits and test suites uninspected`
+          ? `Registered remote URL (${project.repoUrl}) - remote git commits and test suites uninspected`
           : 'Repository not connected',
-        testAuditStatus: 'No automated test audit performed by this system',
+        testAuditStatus: 'No automated test audit performed by this system (external test suites not executed)',
         securityAuditStatus: 'Unverified (no security or dependency scanning executed)',
+        maintenanceAuditStatus: 'Maintenance tracking reflects user-registered tasks only; no infrastructure daemon connected',
         dataCompleteness,
         lastVerifiedTime: new Date().toISOString()
       },
@@ -188,15 +226,20 @@ export class HealthService {
   }
 
   _assessDataCompleteness(project, tasks) {
-    const missing = [];
-    if (!project.description || !project.description.trim()) missing.push('description');
-    if (!project.category || !project.category.trim() || project.category.trim() === 'General') missing.push('category');
-    if (!Array.isArray(project.techStack) || project.techStack.length === 0) missing.push('techStack');
-    if (!project.repoUrl || !project.repoUrl.trim()) missing.push('repoUrl');
-    if (!tasks || tasks.length === 0) missing.push('tasks (no recorded tasks to evaluate progress)');
+    const missingMetadata = [];
+    if (!project.description || !project.description.trim()) missingMetadata.push('description');
+    if (!project.category || !project.category.trim() || project.category.trim() === 'General') missingMetadata.push('category');
+    if (!Array.isArray(project.techStack) || project.techStack.length === 0) missingMetadata.push('techStack');
+    if (!project.repoUrl || !project.repoUrl.trim()) missingMetadata.push('repoUrl');
 
+    const missingRecords = [];
+    if (!tasks || tasks.length === 0) {
+      missingRecords.push('tasks (no recorded tasks to evaluate progress)');
+    }
+
+    const allMissing = [...missingMetadata, ...missingRecords];
     const totalChecklist = 5;
-    const registeredCount = totalChecklist - missing.length;
+    const registeredCount = totalChecklist - allMissing.length;
     const percentage = Math.round((registeredCount / totalChecklist) * 100);
 
     let rating = 'Complete';
@@ -206,7 +249,10 @@ export class HealthService {
     return {
       percentage,
       rating,
-      missingFields: missing,
+      missingMetadata,
+      missingRecords,
+      missingFields: allMissing,
+      hasTaskRecords: Boolean(tasks && tasks.length > 0),
       summary: `${registeredCount}/${totalChecklist} core fields registered (${rating})`
     };
   }

@@ -3,7 +3,16 @@
  * Verifies:
  * 1. Project with zero tasks receives 'Insufficient Data' (never an unjustified 'Healthy').
  * 2. Accurate task progress computation on registered tasks.
- * 3. Documented rules for blockers, bugs, and overdue tasks.
+ * 3. Health Classification Precedence:
+ *    - Active critical blocker at 80% completion -> At Risk
+ *    - Active critical blocker at 100% completion -> At Risk
+ *    - Overdue critical work -> At Risk
+ *    - Unresolved critical bug -> At Risk
+ *    - Ordinary overdue tasks -> Attention Needed
+ *    - Noncritical blockers or unresolved noncritical bugs -> Attention Needed
+ *    - Sufficient assessment data, no material risks -> Healthy
+ *    - Active vs resolved blockers
+ *    - Completed tasks with old due dates (never overdue)
  * 4. Honest reporting of missing metadata and data completeness audit.
  * 5. Accurate source code inspection status ('Source code not inspected').
  * 6. Repository metadata clearly distinguished from source-code analysis.
@@ -57,7 +66,7 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
   });
 
   describe('1. Health Model Correctness for Zero-Task Projects', () => {
-    test('A project with zero registered tasks reports Insufficient Data, not Healthy', async () => {
+    test('Scenario 1 & 9: Project with zero registered tasks reports Insufficient Data, not Healthy', async () => {
       const proj = await store.createProject({
         name: 'Judge Zero Task Project',
         description: 'Clean project created with no recorded tasks',
@@ -75,6 +84,7 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
         health.statusReasons.includes('No registered tasks are available to evaluate progress.'),
         'Must provide explicit reason explaining lack of tasks'
       );
+      assert.ok(health.evidence.dataCompleteness.missingFields.some(f => f.includes('tasks')));
     });
   });
 
@@ -102,27 +112,97 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
     });
   });
 
-  describe('3. Blockers and Overdue Work Rules', () => {
-    test('Active blocker immediately sets healthStatus to At Risk', async () => {
+  describe('3. Health Classification Precedence Scenarios', () => {
+    test('Scenario 2: 80% completion with an active critical blocker is At Risk', async () => {
       const proj = await store.createProject({
-        name: 'Blocker Rule Project',
+        name: 'Eighty Percent Critical Blocker Project',
         category: 'Mobile'
       });
 
+      // 4 completed, 1 critical blocked (80% completion)
+      await store.createTask({ projectId: proj.id, title: 'Task 1', status: 'done' });
+      await store.createTask({ projectId: proj.id, title: 'Task 2', status: 'done' });
+      await store.createTask({ projectId: proj.id, title: 'Task 3', status: 'done' });
+      await store.createTask({ projectId: proj.id, title: 'Task 4', status: 'done' });
       await store.createTask({
         projectId: proj.id,
         title: 'Payment Gateway Integration',
+        priority: 'critical',
         status: 'blocked',
         blocker: 'Merchant sandbox credentials pending verification from upstream provider'
       });
 
       const health = healthService.getHealth(proj.id);
+      assert.equal(health.metrics.completionRate, 80);
       assert.equal(health.healthStatus, 'At Risk');
-      assert.equal(health.metrics.explicitBlockers.length, 1);
-      assert.ok(health.statusReasons.some(r => r.includes('active blocker(s) recorded')));
+      assert.equal(health.metrics.criticalBlockerCount, 1);
+      assert.ok(health.statusReasons.some(r => r.includes('active blocker')));
     });
 
-    test('Overdue medium task triggers Attention Needed', async () => {
+    test('Scenario 3: 100% completion with an active critical blocker is At Risk', async () => {
+      const proj = await store.createProject({
+        name: 'Hundred Percent Critical Blocker Project',
+        category: 'Infrastructure'
+      });
+
+      // Task completed but flagged with an active critical blocker
+      await store.createTask({
+        projectId: proj.id,
+        title: 'Production Deployment Task',
+        priority: 'critical',
+        status: 'done',
+        blocker: 'Upstream gateway TLS certificate revoked'
+      });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.metrics.completionRate, 100);
+      assert.equal(health.healthStatus, 'At Risk');
+      assert.equal(health.metrics.criticalBlockerCount, 1);
+      assert.ok(health.statusReasons.some(r => r.includes('active blocker')));
+    });
+
+    test('Scenario 4: Overdue critical work triggers At Risk', async () => {
+      const proj = await store.createProject({
+        name: 'Overdue Critical Task Project',
+        category: 'Security'
+      });
+
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+      await store.createTask({
+        projectId: proj.id,
+        title: 'Patch CVE vulnerability in auth middleware',
+        status: 'in_progress',
+        priority: 'critical',
+        dueDate: threeDaysAgo
+      });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.healthStatus, 'At Risk');
+      assert.equal(health.metrics.overdueCount, 1);
+      assert.ok(health.statusReasons.some(r => r.includes('critical/high priority')));
+    });
+
+    test('Scenario 5: Unresolved critical bug triggers At Risk', async () => {
+      const proj = await store.createProject({
+        name: 'Critical Bug Project',
+        category: 'Core'
+      });
+
+      await store.createTask({
+        projectId: proj.id,
+        title: 'Data corruption under concurrent writes',
+        status: 'in_progress',
+        priority: 'critical',
+        isBug: true
+      });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.healthStatus, 'At Risk');
+      assert.equal(health.metrics.criticalBugCount, 1);
+      assert.ok(health.statusReasons.some(r => r.includes('critical user-recorded bug(s) open')));
+    });
+
+    test('Scenario 6: Ordinary overdue tasks trigger Attention Needed when no critical risks exist', async () => {
       const proj = await store.createProject({
         name: 'Overdue Medium Task Project',
         category: 'DevOps'
@@ -143,30 +223,122 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
       assert.ok(health.statusReasons.some(r => r.includes('1 overdue task(s) past deadline')));
     });
 
-    test('Overdue critical task triggers At Risk', async () => {
+    test('Scenario 7: Noncritical blockers trigger Attention Needed', async () => {
       const proj = await store.createProject({
-        name: 'Overdue Critical Task Project',
-        category: 'Security'
+        name: 'Noncritical Blocker Project',
+        category: 'UI'
       });
 
-      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
       await store.createTask({
         projectId: proj.id,
-        title: 'Patch CVE vulnerability in auth middleware',
-        status: 'in_progress',
-        priority: 'critical',
-        dueDate: threeDaysAgo
+        title: 'Style icon asset update',
+        status: 'blocked',
+        priority: 'medium',
+        blocker: 'Waiting on SVG export from designer'
       });
 
       const health = healthService.getHealth(proj.id);
-      assert.equal(health.healthStatus, 'At Risk');
-      assert.equal(health.metrics.overdueCount, 1);
-      assert.ok(health.statusReasons.some(r => r.includes('critical/high priority')));
+      assert.equal(health.healthStatus, 'Attention Needed');
+      assert.equal(health.metrics.nonCriticalBlockerCount, 1);
+      assert.equal(health.metrics.criticalBlockerCount, 0);
+      assert.ok(health.statusReasons.some(r => r.includes('active non-critical blocker')));
+    });
+
+    test('Scenario 7: Unresolved noncritical bugs trigger Attention Needed', async () => {
+      const proj = await store.createProject({
+        name: 'Noncritical Bug Project',
+        category: 'Frontend'
+      });
+
+      await store.createTask({
+        projectId: proj.id,
+        title: 'Tooltip alignment offset by 2px',
+        status: 'todo',
+        priority: 'low',
+        isBug: true
+      });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.healthStatus, 'Attention Needed');
+      assert.ok(health.statusReasons.some(r => r.includes('user-recorded bug(s) pending resolution')));
+    });
+
+    test('Scenario 8: Sufficient assessment data and no material risks reports Healthy', async () => {
+      const proj = await store.createProject({
+        name: 'Model Healthy Project',
+        category: 'Services'
+      });
+
+      await store.createTask({ projectId: proj.id, title: 'API spec review', status: 'done' });
+      await store.createTask({ projectId: proj.id, title: 'Endpoint implementation', status: 'done' });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.healthStatus, 'Healthy');
+      assert.equal(health.metrics.completionRate, 100);
+      assert.ok(health.statusReasons.includes('All recorded tasks proceeding with no open blockers or overdue deadlines'));
+    });
+
+    test('Edge Case: Active versus resolved blockers', async () => {
+      const proj = await store.createProject({
+        name: 'Resolved Blocker Edge Case',
+        category: 'Data'
+      });
+
+      // Task with resolved blocker flag
+      await store.createTask({
+        projectId: proj.id,
+        title: 'Migrate DB records',
+        status: 'in_progress',
+        priority: 'critical',
+        blocker: 'resolved'
+      });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.metrics.explicitBlockers.length, 0, 'Resolved blocker must not be counted as active blocker');
+      assert.equal(health.metrics.criticalBlockerCount, 0);
+    });
+
+    test('Edge Case: Completed tasks with past due dates are never counted as overdue', async () => {
+      const proj = await store.createProject({
+        name: 'Completed Overdue Edge Case',
+        category: 'Release'
+      });
+
+      const lastMonth = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      await store.createTask({
+        projectId: proj.id,
+        title: 'Release v1.0.0',
+        status: 'done',
+        priority: 'critical',
+        dueDate: lastMonth
+      });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.metrics.overdueCount, 0, 'Completed tasks must never be marked overdue');
+      assert.equal(health.healthStatus, 'Healthy');
+    });
+
+    test('Edge Case: Tasks with missing due dates are not counted as overdue', async () => {
+      const proj = await store.createProject({
+        name: 'Missing Due Date Edge Case',
+        category: 'Design'
+      });
+
+      await store.createTask({
+        projectId: proj.id,
+        title: 'Design wireframes',
+        status: 'in_progress',
+        priority: 'high',
+        dueDate: null
+      });
+
+      const health = healthService.getHealth(proj.id);
+      assert.equal(health.metrics.overdueCount, 0);
     });
   });
 
   describe('4. Data Completeness & Missing Metadata Audit', () => {
-    test('Identifies missing fields honestly without inventing fictional data', async () => {
+    test('Identifies missing metadata vs missing task records honestly', async () => {
       const minimalProj = await store.createProject({
         name: 'Barebones Project'
         // description, category, techStack, repoUrl omitted
@@ -176,11 +348,11 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
       const completeness = health.evidence.dataCompleteness;
 
       assert.equal(completeness.rating, 'Minimal');
-      assert.ok(completeness.missingFields.includes('description'));
-      assert.ok(completeness.missingFields.includes('category'));
-      assert.ok(completeness.missingFields.includes('techStack'));
-      assert.ok(completeness.missingFields.includes('repoUrl'));
-      assert.ok(completeness.missingFields.some(f => f.includes('tasks')));
+      assert.ok(completeness.missingMetadata.includes('description'));
+      assert.ok(completeness.missingMetadata.includes('category'));
+      assert.ok(completeness.missingMetadata.includes('techStack'));
+      assert.ok(completeness.missingMetadata.includes('repoUrl'));
+      assert.equal(completeness.hasTaskRecords, false);
       assert.ok(completeness.percentage <= 40);
     });
 
@@ -199,6 +371,7 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
 
       assert.equal(completeness.rating, 'Complete');
       assert.equal(completeness.missingFields.length, 0);
+      assert.equal(completeness.hasTaskRecords, true);
       assert.equal(completeness.percentage, 100);
     });
   });
@@ -218,6 +391,7 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
       );
       assert.ok(health.evidence.securityAuditStatus.includes('Unverified'));
       assert.ok(health.evidence.testAuditStatus.includes('No automated test audit'));
+      assert.ok(health.evidence.maintenanceAuditStatus.includes('user-registered tasks only'));
     });
 
     test('Repository URL is recorded but clearly audited as uninspected remote code', async () => {
@@ -281,7 +455,7 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
       assert.ok(outcome.explanation.includes('techStack'));
       assert.ok(outcome.explanation.includes('tasks'));
 
-      // 5. Cautionary disclaimer regarding absence of bugs != bug-free code
+      // 5. Cautionary disclaimer regarding absence of bugs != bug-free code (Scenario 10)
       assert.ok(outcome.explanation.includes('A lack of recorded bugs or blockers does NOT indicate that the software is bug-free'));
     });
 
@@ -294,7 +468,7 @@ describe('Evidence-Based Project Intelligence & Truthful Health', () => {
       const projId = dynamicProj.data?.project?.id;
       assert.ok(projId);
 
-      // Add a blocked task
+      // Add a blocked task with high priority (critical blocker)
       await client.callTool('create_task', {
         projectId: projId,
         title: 'Provision multi-region RDS read replica',
