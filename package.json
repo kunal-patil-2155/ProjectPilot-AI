@@ -1,0 +1,25 @@
+{
+  "name": "projectpilot-ai",
+  "version": "1.0.0",
+  "description": "ProjectPilot AI - Personal project operations assistant for software developers (Build, Ship, Shape: Amazon Developer Hackathon 2026)",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "alexa-plus",
+    "hackathon",
+    "developer-tools",
+    "project-management"
+  ],
+  "author": "Antigravity Developer",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^3.24.2"
+  }
+}
