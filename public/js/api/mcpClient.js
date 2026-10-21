@@ -2,11 +2,19 @@
  * ProjectPilot AI - Browser-side MCP Client
  * Communicates with the MCP server strictly over Streamable HTTP (spec: 2025-11-25).
  * Performs initialization, capability negotiation, tool discovery, and tool invocation.
+ * Supports secure authentication credentials (Bearer token / API key) when configured.
  */
 
 export class McpBrowserClient {
-  constructor(endpoint = '/mcp') {
+  /**
+   * @param {string} endpoint - HTTP URL to the MCP Streamable HTTP endpoint (default: '/mcp')
+   * @param {Object|string} options - Configuration options or API key string
+   * @param {string} options.apiKey - Optional API key for authenticating requests
+   */
+  constructor(endpoint = '/mcp', options = {}) {
     this.endpoint = endpoint;
+    const opts = typeof options === 'string' ? { apiKey: options } : options;
+    this.apiKey = opts.apiKey || null;
     this.sessionId = null;
     this.protocolVersion = '2025-11-25';
     this.connected = false;
@@ -14,6 +22,33 @@ export class McpBrowserClient {
     this.tools = [];
     this._requestId = 1;
     this.listeners = new Set();
+  }
+
+  /**
+   * Set or update authentication credential.
+   * @param {string|null} key
+   */
+  setApiKey(key) {
+    this.apiKey = key || null;
+  }
+
+  /**
+   * Construct standard MCP headers including session and authentication tokens.
+   */
+  _buildHeaders(extra = {}) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      'mcp-protocol-version': this.protocolVersion,
+      ...extra
+    };
+    if (this.sessionId && !headers['mcp-session-id']) {
+      headers['mcp-session-id'] = this.sessionId;
+    }
+    if (this.apiKey && !headers['Authorization'] && !headers['authorization']) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    return headers;
   }
 
   /**
@@ -57,25 +92,23 @@ export class McpBrowserClient {
       }
     };
 
+    const headers = this._buildHeaders();
     this._emit('request', {
       method: 'initialize',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+      headers,
       body: initPayload
     });
 
     const res = await fetch(this.endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream'
-      },
+      headers,
       body: JSON.stringify(initPayload)
     });
 
     if (!res.ok) {
       const errText = await res.text();
       const err = new Error(`MCP Initialization failed [HTTP ${res.status}]: ${errText}`);
-      this._emit('error', { stage: 'initialize', error: err.message });
+      this._emit('error', { stage: 'initialize', status: res.status, error: err.message });
       throw err;
     }
 
@@ -99,15 +132,7 @@ export class McpBrowserClient {
       params: {}
     };
 
-    const notifyHeaders = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
-      'mcp-protocol-version': this.protocolVersion
-    };
-    if (this.sessionId) {
-      notifyHeaders['mcp-session-id'] = this.sessionId;
-    }
-
+    const notifyHeaders = this._buildHeaders();
     this._emit('request', { method: 'notifications/initialized', headers: notifyHeaders, body: notifyPayload });
 
     await fetch(this.endpoint, {
@@ -143,13 +168,7 @@ export class McpBrowserClient {
       params: {}
     };
 
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
-      'mcp-protocol-version': this.protocolVersion
-    };
-    if (this.sessionId) headers['mcp-session-id'] = this.sessionId;
-
+    const headers = this._buildHeaders();
     this._emit('request', { method: 'tools/list', headers, body: payload });
 
     const res = await fetch(this.endpoint, {
@@ -190,13 +209,7 @@ export class McpBrowserClient {
       }
     };
 
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
-      'mcp-protocol-version': this.protocolVersion
-    };
-    if (this.sessionId) headers['mcp-session-id'] = this.sessionId;
-
+    const headers = this._buildHeaders();
     this._emit('tool_call_start', { name, args, payload, headers });
 
     const res = await fetch(this.endpoint, {
@@ -241,9 +254,10 @@ export class McpBrowserClient {
   async disconnect() {
     if (!this.sessionId) return;
     try {
+      const headers = this._buildHeaders();
       await fetch(this.endpoint, {
         method: 'DELETE',
-        headers: { 'mcp-session-id': this.sessionId }
+        headers
       });
     } catch (err) {
       console.warn('Disconnect notification failed:', err);
@@ -278,18 +292,12 @@ export class McpBrowserClient {
           if (jsonStr) {
             try {
               return JSON.parse(jsonStr);
-            } catch (err) {
-              console.warn('Failed to parse SSE data chunk:', jsonStr);
-            }
+            } catch {}
           }
         }
       }
     }
 
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { raw: text };
-    }
+    return { raw: text };
   }
 }

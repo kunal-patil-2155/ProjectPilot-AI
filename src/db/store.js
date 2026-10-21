@@ -126,7 +126,14 @@ export class ProjectStore {
       throw new Error(`Invalid priority "${input.priority}". Allowed: ${VALID_PRIORITIES.join(', ')}`);
     }
 
-    const id = input.id || `proj-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`;
+    if (input.id !== undefined && input.id !== null) {
+      const idStr = String(input.id).trim();
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(idStr) || idStr === '__proto__' || idStr === 'constructor' || idStr === 'prototype') {
+        throw new Error('Invalid project ID format: must be 1-64 alphanumeric characters, underscores, or hyphens.');
+      }
+    }
+
+    const id = input.id ? String(input.id).trim() : `proj-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`;
     if (this.data.projects.some(p => p.id === id)) {
       throw new Error(`Project with ID "${id}" already exists.`);
     }
@@ -316,7 +323,14 @@ export class ProjectStore {
       throw new Error(`Invalid task priority "${input.priority}". Allowed: ${VALID_PRIORITIES.join(', ')}`);
     }
 
-    const id = input.id || `task-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`;
+    if (input.id !== undefined && input.id !== null) {
+      const idStr = String(input.id).trim();
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(idStr) || idStr === '__proto__' || idStr === 'constructor' || idStr === 'prototype') {
+        throw new Error('Invalid task ID format: must be 1-64 alphanumeric characters, underscores, or hyphens.');
+      }
+    }
+
+    const id = input.id ? String(input.id).trim() : `task-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`;
     if (this.data.tasks.some(t => t.id === id)) {
       throw new Error(`Task with ID "${id}" already exists.`);
     }

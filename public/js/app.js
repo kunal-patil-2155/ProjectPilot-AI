@@ -32,8 +32,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupAssistantChat();
   setupInspector();
 
-  // Initialize MCP client
-  state.mcpClient = new McpBrowserClient('/mcp');
+  // Initialize MCP client with optional API key stored in sessionStorage
+  const savedApiKey = typeof window !== 'undefined' ? window.sessionStorage?.getItem('projectpilot_api_key') : null;
+  state.mcpClient = new McpBrowserClient('/mcp', { apiKey: savedApiKey });
   state.orchestrator = new AssistantOrchestrator(state.mcpClient);
 
   // Hook into MCP telemetry events
@@ -48,6 +49,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('MCP Connected (Streamable HTTP 2025-11-25)', 'success');
     await refreshAllData();
   } catch (err) {
+    if (err.message && err.message.includes('401')) {
+      const enteredKey = prompt('Authentication required by MCP server.\nPlease enter your MCP API Key:');
+      if (enteredKey) {
+        window.sessionStorage?.setItem('projectpilot_api_key', enteredKey.trim());
+        state.mcpClient.setApiKey(enteredKey.trim());
+        try {
+          await state.mcpClient.connect();
+          showToast('MCP Connected with API key', 'success');
+          await refreshAllData();
+          return;
+        } catch (retryErr) {
+          showToast(`Authentication failed: ${retryErr.message}`, 'error');
+        }
+      }
+    }
     console.error('Initial MCP connection error:', err);
     showToast(`MCP Connection Error: ${err.message}`, 'error');
   }
