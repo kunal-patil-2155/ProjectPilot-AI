@@ -1,0 +1,228 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "description": "ProjectPilot AI Demonstration Dataset (Sample Data)",
+    "seededAt": "2026-10-21T18:30:20.809Z"
+  },
+  "projects": [
+    {
+      "id": "proj-cloudsync",
+      "name": "CloudSync Gateway",
+      "description": "High-throughput file synchronization service connecting on-premise storage to multi-region cloud buckets.",
+      "category": "Fullstack",
+      "techStack": [
+        "Node.js",
+        "TypeScript",
+        "AWS S3",
+        "Docker"
+      ],
+      "repoUrl": "https://github.com/example/cloudsync-gateway",
+      "status": "active",
+      "priority": "high",
+      "createdAt": "2026-09-21T18:30:20.809Z",
+      "updatedAt": "2026-10-20T18:30:20.809Z"
+    },
+    {
+      "id": "proj-devpulse",
+      "name": "DevPulse Analytics",
+      "description": "Developer productivity and DORA metrics aggregation backend processing telemetry from Git repositories.",
+      "category": "Backend",
+      "techStack": [
+        "Go",
+        "PostgreSQL",
+        "Redis",
+        "Kubernetes"
+      ],
+      "repoUrl": "https://github.com/example/devpulse-analytics",
+      "status": "active",
+      "priority": "critical",
+      "createdAt": "2026-09-06T18:30:20.809Z",
+      "updatedAt": "2026-10-19T18:30:20.809Z"
+    },
+    {
+      "id": "proj-checkout",
+      "name": "Mobile Checkout SDK",
+      "description": "Cross-platform mobile payment and checkout module with one-tap payment integrations.",
+      "category": "Mobile",
+      "techStack": [
+        "Swift",
+        "Kotlin",
+        "GraphQL",
+        "Stripe"
+      ],
+      "repoUrl": "https://github.com/example/mobile-checkout-sdk",
+      "status": "active",
+      "priority": "critical",
+      "createdAt": "2026-10-01T18:30:20.809Z",
+      "updatedAt": "2026-10-20T18:30:20.809Z"
+    },
+    {
+      "id": "proj-edgecache",
+      "name": "Edge Cache Daemon",
+      "description": "High-performance reverse proxy and dynamic caching daemon deployed on edge PoP instances.",
+      "category": "DevOps",
+      "techStack": [
+        "Rust",
+        "Linux",
+        "eBPF",
+        "Tokio"
+      ],
+      "repoUrl": "https://github.com/example/edge-cache-daemon",
+      "status": "planning",
+      "priority": "medium",
+      "createdAt": "2026-10-11T18:30:20.809Z",
+      "updatedAt": "2026-10-18T18:30:20.809Z"
+    },
+    {
+      "id": "proj-mvigzcd9-43ac",
+      "name": "ImperialStay",
+      "description": "",
+      "category": "Fullstack",
+      "techStack": [
+        "Backend (server/) Runtime & Framework: Node.js",
+        "Express.js Database: MongoDB Atlas / Mongoose ORM Authentication: JWT (JSON Web Tokens)",
+        "bcryptjs",
+        "Cookie Parser",
+        "HTTP-Only Cookies Real-Time Communication: Socket.IO WebSockets Security & Logging: Helmet",
+        "CORS",
+        "Express Rate Limit",
+        "Morgan Storage & Uploads: Multer",
+        "Cloudinary API Document Generation: PDFKit (Invoices & Salary Slips) Emails: Nodemailer SMTP API Spec: Swagger / OpenAPI 3.0 (server/swagger.json) Frontend (src/) Core: React 18",
+        "Vite",
+        "JavaScript Routing & Querying: React Router DOM v6",
+        "React Query Styling: Pure Vanilla CSS",
+        "Glassmorphism backdrop blurs",
+        "Royal Gold accents (#D4AF37)",
+        "Dark Obsidian & Light Pearl Themes (Zero Tailwind or Bootstrap) Charts: Chart.js (react-chartjs-2) Forms & Validation: React Hook Form",
+        "Yup Validation Schema Notifications: React Hot Toast"
+      ],
+      "repoUrl": "https://github.com/kunal-patil-2155/ImperialStay",
+      "status": "active",
+      "priority": "high",
+      "createdAt": "2026-10-21T18:52:56.542Z",
+      "updatedAt": "2026-10-21T18:53:21.689Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-cloudsync-1",
+      "projectId": "proj-cloudsync",
+      "title": "Implement multipart upload resume for files > 5GB",
+      "description": "Add etag checkpointing to allow interrupted S3 uploads to resume without full retransmission.",
+      "status": "in_progress",
+      "priority": "high",
+      "dueDate": "2026-10-23T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": false,
+      "isBug": false,
+      "createdAt": "2026-10-14T18:30:20.809Z",
+      "updatedAt": "2026-10-20T18:30:20.809Z",
+      "completedAt": null
+    },
+    {
+      "id": "task-cloudsync-cert",
+      "projectId": "proj-cloudsync",
+      "title": "Rotate SSL certs and renew AWS IAM session keys",
+      "description": "Quarterly rotation of TLS certificates and renewal of staging IAM credentials.",
+      "status": "done",
+      "priority": "high",
+      "dueDate": "2026-10-24T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": true,
+      "isBug": false,
+      "createdAt": "2026-10-16T18:30:20.809Z",
+      "updatedAt": "2026-10-21T19:04:19.291Z",
+      "completedAt": "2026-10-21T19:04:19.291Z"
+    },
+    {
+      "id": "task-devpulse-leak",
+      "projectId": "proj-devpulse",
+      "title": "Resolve memory spike during hourly rollup aggregation",
+      "description": "Hourly rollup worker allocates unbounded Redis buffer during high-event volume bursts.",
+      "status": "in_progress",
+      "priority": "critical",
+      "dueDate": "2026-10-22T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": false,
+      "isBug": true,
+      "createdAt": "2026-10-17T18:30:20.809Z",
+      "updatedAt": "2026-10-20T18:30:20.809Z",
+      "completedAt": null
+    },
+    {
+      "id": "task-devpulse-db",
+      "projectId": "proj-devpulse",
+      "title": "Run PostgreSQL vacuum analyze and re-index rollup tables",
+      "description": "Routine maintenance to reclaim space on time-series partitions.",
+      "status": "todo",
+      "priority": "medium",
+      "dueDate": "2026-10-20T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": true,
+      "isBug": false,
+      "createdAt": "2026-10-07T18:30:20.809Z",
+      "updatedAt": "2026-10-19T18:30:20.809Z",
+      "completedAt": null
+    },
+    {
+      "id": "task-checkout-oauth",
+      "projectId": "proj-checkout",
+      "title": "Fix token refresh race condition in background mode",
+      "description": "Simultaneous API calls in background refresh trigger invalid grant error from upstream auth.",
+      "status": "in_progress",
+      "priority": "critical",
+      "dueDate": "2026-10-22T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": false,
+      "isBug": true,
+      "createdAt": "2026-10-18T18:30:20.809Z",
+      "updatedAt": "2026-10-21T19:31:57.577Z",
+      "completedAt": null
+    },
+    {
+      "id": "task-checkout-applepay",
+      "projectId": "proj-checkout",
+      "title": "Integrate Apple Pay PKPaymentAuthorizationController",
+      "description": "Add biometric payment flow callback handlers and error mapping.",
+      "status": "todo",
+      "priority": "high",
+      "dueDate": "2026-10-26T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": false,
+      "isBug": false,
+      "createdAt": "2026-10-15T18:30:20.809Z",
+      "updatedAt": "2026-10-15T18:30:20.809Z",
+      "completedAt": null
+    },
+    {
+      "id": "task-edgecache-ebpf",
+      "projectId": "proj-edgecache",
+      "title": "Draft eBPF XDP socket packet filter prototype",
+      "description": "Initial performance bench for filtering TCP SYN packets at the network card driver level.",
+      "status": "todo",
+      "priority": "medium",
+      "dueDate": "2026-11-04T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": false,
+      "isBug": false,
+      "createdAt": "2026-10-16T18:30:20.809Z",
+      "updatedAt": "2026-10-16T18:30:20.809Z",
+      "completedAt": null
+    },
+    {
+      "id": "task-cloudsync-init",
+      "projectId": "proj-cloudsync",
+      "title": "Setup repository CI pipeline and container definitions",
+      "description": "Configured GitHub Actions for linting, testing, and multi-arch Docker image build.",
+      "status": "done",
+      "priority": "medium",
+      "dueDate": "2026-10-11T18:30:20.809Z",
+      "blocker": null,
+      "isMaintenance": false,
+      "isBug": false,
+      "createdAt": "2026-09-26T18:30:20.809Z",
+      "updatedAt": "2026-10-06T18:30:20.809Z",
+      "completedAt": "2026-10-06T18:30:20.809Z"
+    }
+  ]
+}
