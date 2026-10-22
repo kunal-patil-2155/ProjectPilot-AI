@@ -104,7 +104,11 @@ function setupNavigation() {
   const toggleBtn = document.getElementById('sidebarToggle');
   if (toggleBtn) {
     toggleBtn.addEventListener('click', () => {
-      sidebar.classList.toggle('collapsed');
+      if (window.innerWidth <= 992) {
+        sidebar.classList.toggle('mobile-open');
+      } else {
+        sidebar.classList.toggle('collapsed');
+      }
     });
   }
 
@@ -113,8 +117,19 @@ function setupNavigation() {
     item.addEventListener('click', () => {
       const viewName = item.dataset.view;
       switchView(viewName);
+      if (window.innerWidth <= 992) {
+        sidebar.classList.remove('mobile-open');
+      }
     });
   });
+
+  const rescueBtn = document.getElementById('dashboardRescueBtn');
+  if (rescueBtn) {
+    rescueBtn.addEventListener('click', async () => {
+      switchView('assistant');
+      await executeAssistantPrompt('Investigate DevPulse Analytics');
+    });
+  }
 
   const refreshBtn = document.getElementById('refreshDashboardBtn');
   if (refreshBtn) {
@@ -140,6 +155,11 @@ function switchView(viewName) {
   if (targetPanel) {
     targetPanel.classList.add('active');
   }
+}
+
+// Expose on window for dynamic controls
+if (typeof window !== 'undefined') {
+  window.switchView = switchView;
 }
 
 function capitalize(s) {
@@ -947,6 +967,10 @@ async function executeAssistantPrompt(promptText) {
 
   // Scroll stream to bottom
   if (stream) stream.scrollTop = stream.scrollHeight;
+}
+
+if (typeof window !== 'undefined') {
+  window.executeAssistantPrompt = executeAssistantPrompt;
 }
 
 function setupRescueCardListeners(card) {

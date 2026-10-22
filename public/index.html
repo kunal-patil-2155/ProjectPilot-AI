@@ -11,6 +11,9 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
+  <!-- Accessible Skip Link (WCAG 2.1 AA) -->
+  <a href="#mainContent" class="skip-link">Skip to main content</a>
+
   <div class="app-layout">
     <!-- Top Navigation Header -->
     <header class="app-header">
@@ -102,7 +105,7 @@
       </aside>
 
       <!-- Main Content Area -->
-      <main class="app-main">
+      <main id="mainContent" class="app-main" tabindex="-1">
         <!-- Toast / Notice Container -->
         <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
@@ -157,6 +160,52 @@
               <div class="stat-content">
                 <span class="stat-label">Maintenance Due</span>
                 <span id="statMaintenanceDue" class="stat-value">0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Autonomous Operations Lifecycle Tracker -->
+          <div class="operations-workflow-card">
+            <div class="workflow-header">
+              <div class="workflow-title-group">
+                <span class="workflow-badge">Autonomous Operations Engine</span>
+                <h2 class="workflow-title">Autonomous Project Rescue Lifecycle</h2>
+                <p class="workflow-desc">Deterministic 6-stage remediation loop powered by 12 Model Context Protocol (MCP) Streamable HTTP tools.</p>
+              </div>
+              <button class="btn btn-primary btn-sm trigger-rescue-flow" id="dashboardRescueBtn" title="Launch conversational project rescue in Assistant">
+                <span>Run Rescue Workflow</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </button>
+            </div>
+            <div class="workflow-steps-track" role="list" aria-label="Project Rescue Stages">
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">01</span>
+                <span class="step-label">Investigate</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">02</span>
+                <span class="step-label">Diagnose</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">03</span>
+                <span class="step-label">Plan</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">04</span>
+                <span class="step-label">Approve</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">05</span>
+                <span class="step-label">Execute</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">06</span>
+                <span class="step-label">Verify</span>
               </div>
             </div>
           </div>
@@ -420,6 +469,39 @@
               </div>
             </div>
 
+            <!-- Workflow Stepper Indicator -->
+            <div class="workflow-steps-track" style="margin: 12px 20px 0; border-radius: var(--radius-md);" role="list" aria-label="Rescue Lifecycle Sequence">
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">01</span>
+                <span class="step-label">Investigate</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">02</span>
+                <span class="step-label">Diagnose</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">03</span>
+                <span class="step-label">Plan</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">04</span>
+                <span class="step-label">Approve</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">05</span>
+                <span class="step-label">Execute</span>
+              </div>
+              <div class="workflow-step-sep" aria-hidden="true">➔</div>
+              <div class="workflow-step-pill" role="listitem">
+                <span class="step-num">06</span>
+                <span class="step-label">Verify</span>
+              </div>
+            </div>
+
             <!-- Chat Stream -->
             <div id="chatMessageStream" class="chat-message-stream" role="log" aria-live="polite">
               <div class="chat-msg msg-assistant">
@@ -610,11 +692,11 @@
         <div class="info-pill"><span class="pill-label">Transport:</span> Streamable HTTP</div>
         <div class="info-pill"><span class="pill-label">Protocol Version:</span> <code id="inspectorProtocolVersion">2025-11-25</code></div>
         <div class="info-pill"><span class="pill-label">Session ID:</span> <code id="inspectorSessionId">Connecting...</code></div>
-        <div class="info-pill"><span class="pill-label">Tools Discovered:</span> <span id="inspectorToolsCount" class="badge">11</span></div>
+        <div class="info-pill"><span class="pill-label">Tools Discovered:</span> <span id="inspectorToolsCount" class="badge">12</span></div>
       </div>
 
       <div class="inspector-tabs">
-        <button class="tab-btn active" data-tab="tools">Available Tools (11)</button>
+        <button class="tab-btn active" data-tab="tools">Available Tools (12)</button>
         <button class="tab-btn" data-tab="telemetry">Live Protocol Telemetry Log</button>
       </div>
 
