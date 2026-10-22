@@ -11,6 +11,17 @@ import { MaintenanceService } from '../services/maintenanceService.js';
 import { generateRescuePlan } from '../services/rescueService.js';
 import { GitHubService } from '../services/githubService.js';
 
+export const MUTATING_TOOL_NAMES = new Set([
+  'create_project',
+  'update_project',
+  'delete_project',
+  'create_task',
+  'update_task_status',
+  'reopen_task',
+  'delete_task',
+  'manage_blocker'
+]);
+
 /**
  * Creates and configures an McpServer instance with all tools.
  * @param {import('../db/store.js').ProjectStore} store
@@ -21,6 +32,21 @@ export function createProjectPilotMcpServer(store, options = {}) {
   const priorityService = new PriorityService(store);
   const maintenanceService = new MaintenanceService(store);
   const githubService = options.githubService || new GitHubService();
+
+  const isProduction = options.isProduction !== undefined
+    ? options.isProduction
+    : (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL));
+
+  function verifyMutationAuth(toolName) {
+    if (isProduction) {
+      if (options.authenticated === false) {
+        throw new Error(`Authentication required: Mutating operation '${toolName}' forbidden in production without valid credentials.`);
+      }
+      if (options.isDurable === false) {
+        throw new Error(`Service Unavailable: Durable persistence is not configured. Mutating operation '${toolName}' disabled to prevent data loss.`);
+      }
+    }
+  }
 
   const server = new McpServer({
     name: 'projectpilot-mcp',
@@ -123,6 +149,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
     },
     async (args) => {
       try {
+        verifyMutationAuth('create_project');
         const created = await store.createProject(args);
         return {
           content: [{
@@ -158,6 +185,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
     },
     async (args) => {
       try {
+        verifyMutationAuth('update_project');
         const { projectId, ...updates } = args;
         const updated = await store.updateProject(projectId, updates);
         return {
@@ -224,6 +252,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
     },
     async (args) => {
       try {
+        verifyMutationAuth('create_task');
         const created = await store.createTask(args);
         return {
           content: [{
@@ -254,6 +283,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
     },
     async (args) => {
       try {
+        verifyMutationAuth('update_task_status');
         const updated = await store.updateTaskStatus(args.taskId, args.status, args.blockerReason);
         return {
           content: [{
@@ -505,6 +535,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
       },
       async (args) => {
         try {
+          verifyMutationAuth('delete_project');
           if (args.confirmDelete !== true) {
             return {
               isError: true,
@@ -549,6 +580,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
       },
       async (args) => {
         try {
+          verifyMutationAuth('reopen_task');
           const updated = await store.reopenTask(args.taskId, args.targetStatus || 'todo');
           await store.recordAudit({
             action: 'reopen_task',
@@ -586,6 +618,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
       },
       async (args) => {
         try {
+          verifyMutationAuth('delete_task');
           if (args.confirmDelete !== true) {
             return {
               isError: true,
@@ -631,6 +664,7 @@ export function createProjectPilotMcpServer(store, options = {}) {
       },
       async (args) => {
         try {
+          verifyMutationAuth('manage_blocker');
           if (args.action === 'block') {
             if (!args.blockerReason || !args.blockerReason.trim()) {
               return {

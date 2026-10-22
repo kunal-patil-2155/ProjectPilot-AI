@@ -936,6 +936,18 @@ You can ask me to:
 
     const target = matches[0];
 
+    if (this.executionMode === 'ASK') {
+      return {
+        workflow: 'complete_task_plan',
+        toolCalls,
+        explanation: `**Proposed Task Completion (ASK Mode):**\n` +
+          `• **Task:** "${target.title}" (\`${target.id}\`)\n` +
+          `• **Current Status:** ${(target.status || 'todo').toUpperCase()}\n` +
+          `• **Target Status:** DONE\n\n` +
+          `*To execute this change, switch to APPROVE or AUTOPILOT mode.*`
+      };
+    }
+
     // Step 2: Call update_task_status tool
     const updateRes = await this.mcpClient.callTool('update_task_status', {
       taskId: target.id,
@@ -2179,6 +2191,10 @@ You can ask me to:
     }
 
     if (matches.length > 1) {
+      this.pendingResolution = {
+        action: 'reopen_task',
+        candidates: matches
+      };
       return {
         workflow: 'reopen_task_ambiguous',
         toolCalls,
@@ -2191,6 +2207,18 @@ You can ask me to:
     }
 
     const target = matches[0];
+
+    if (this.executionMode === 'ASK') {
+      return {
+        workflow: 'reopen_task_plan',
+        toolCalls,
+        explanation: `**Proposed Task Reopen (ASK Mode):**\n` +
+          `• **Task:** "${target.title}" (\`${target.id}\`)\n` +
+          `• **Current Status:** ${(target.status || 'done').toUpperCase()}\n` +
+          `• **Target Status:** TODO\n\n` +
+          `*To execute, switch to APPROVE or AUTOPILOT mode.*`
+      };
+    }
 
     const updateRes = await this.mcpClient.callTool('update_task_status', {
       taskId: target.id,
@@ -2280,6 +2308,16 @@ You can ask me to:
       );
       if (match) {
         return this._workflowCompleteTask(`complete task ${match.id}`);
+      }
+    }
+
+    if (resolution.action === 'reopen_task') {
+      const match = resolution.candidates.find(c =>
+        c.id.toLowerCase() === input.toLowerCase() ||
+        c.title.toLowerCase().includes(input.toLowerCase())
+      );
+      if (match) {
+        return this._workflowReopenTask(`reopen task ${match.id}`);
       }
     }
 

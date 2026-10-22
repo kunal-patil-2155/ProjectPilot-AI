@@ -34,9 +34,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupGitHubAuditView();
   setupAuditLogView();
 
-  // Initialize MCP client with optional API key stored in sessionStorage
-  const savedApiKey = typeof window !== 'undefined' ? window.sessionStorage?.getItem('projectpilot_api_key') : null;
-  state.mcpClient = new McpBrowserClient('/mcp', { apiKey: savedApiKey });
+  // Initialize MCP client strictly in memory (no persistent credentials in localStorage, sessionStorage, or cookies)
+  state.mcpClient = new McpBrowserClient('/mcp');
   state.orchestrator = new AssistantOrchestrator(state.mcpClient);
 
   // Hook into MCP telemetry events
@@ -45,6 +44,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateMcpStatusUi();
   });
 
+  // Query backend gateway capabilities for developer settings
+  fetchBackendInfo().catch(() => {});
+
   try {
     showToast('Initializing MCP Streamable HTTP session...', 'info');
     await state.mcpClient.connect();
@@ -52,19 +54,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     await refreshAllData();
   } catch (err) {
     if (err.message && err.message.includes('401')) {
-      const enteredKey = prompt('Authentication required by MCP server.\nPlease enter your MCP API Key:');
-      if (enteredKey) {
-        window.sessionStorage?.setItem('projectpilot_api_key', enteredKey.trim());
-        state.mcpClient.setApiKey(enteredKey.trim());
-        try {
-          await state.mcpClient.connect();
-          showToast('MCP Connected with API key', 'success');
-          await refreshAllData();
-          return;
-        } catch (retryErr) {
-          showToast(`Authentication failed: ${retryErr.message}`, 'error');
-        }
+      setAuthStatus('auth_failed', 'Authentication required by MCP Gateway (HTTP 401).');
+      showToast('Authentication required by MCP server. Please configure your API key in Developer Settings.', 'warning');
+      const settingsModal = document.getElementById('settingsModal');
+      if (settingsModal) {
+        updateSettingsModalUi();
+        settingsModal.showModal();
       }
+      return;
     }
     console.error('Initial MCP connection error:', err);
     showToast(`MCP Connection Error: ${err.message}`, 'error');
@@ -640,6 +637,219 @@ async function handleDeleteTask(taskId) {
 }
 
 // ==========================================================================
+// DEVELOPER SETTINGS & AUTHENTICATION STATE (IN-MEMORY ONLY)
+// ==========================================================================
+
+const authUiState = {
+  status: 'not_configured', // 'not_configured' | 'configured' | 'connected' | 'auth_failed'
+  statusMessage: 'No API key is held in application memory. Read-only inspection is active; mutating operations require an API key in production.',
+  backendInfo: null
+};
+
+function setAuthStatus(status, message) {
+  authUiState.status = status;
+  if (message) authUiState.statusMessage = message;
+  updateSettingsModalUi();
+}
+
+async function fetchBackendInfo() {
+  try {
+    const res = await fetch('/api/info');
+    if (res.ok) {
+      authUiState.backendInfo = await res.json();
+    }
+  } catch {
+    authUiState.backendInfo = null;
+  }
+  updateSettingsModalUi();
+}
+
+function updateSettingsModalUi() {
+  const badge = document.getElementById('settingsAuthStatusBadge');
+  const explanation = document.getElementById('settingsStatusExplanation');
+  const clearBtn = document.getElementById('clearSettingsKeyBtn');
+  const envBadge = document.getElementById('settingsServerEnvBadge');
+  const storageBadge = document.getElementById('settingsStorageBackendBadge');
+  const inspectorAuthBadge = document.getElementById('inspectorAuthStatusBadge');
+
+  const hasKey = state.mcpClient ? state.mcpClient.hasApiKey() : false;
+
+  if (clearBtn) {
+    clearBtn.disabled = !hasKey;
+  }
+
+  if (badge) {
+    switch (authUiState.status) {
+      case 'connected':
+        badge.className = 'badge badge-success';
+        badge.textContent = 'Connected & Authenticated';
+        break;
+      case 'configured':
+        badge.className = 'badge badge-info';
+        badge.textContent = 'Configured (In-Memory)';
+        break;
+      case 'auth_failed':
+        badge.className = 'badge badge-danger';
+        badge.textContent = 'Authentication failed (HTTP 401)';
+        break;
+      case 'not_configured':
+      default:
+        badge.className = 'badge badge-secondary';
+        badge.textContent = 'Not configured';
+        break;
+    }
+  }
+
+  if (explanation) {
+    explanation.textContent = authUiState.statusMessage;
+  }
+
+  if (inspectorAuthBadge) {
+    if (hasKey) {
+      inspectorAuthBadge.className = 'badge badge-success';
+      inspectorAuthBadge.textContent = 'Configured (In-Memory)';
+    } else {
+      inspectorAuthBadge.className = 'badge badge-secondary';
+      inspectorAuthBadge.textContent = 'In-Memory (None)';
+    }
+  }
+
+  if (envBadge) {
+    if (authUiState.backendInfo) {
+      const isProd = authUiState.backendInfo.isProduction;
+      const isAuth = authUiState.backendInfo.authConfigured;
+      envBadge.textContent = isProd
+        ? (isAuth ? 'Production (Key Enforced)' : 'Production (No Key)')
+        : 'Development (Local)';
+      envBadge.className = isProd ? 'badge badge-warning' : 'badge badge-info';
+    } else {
+      envBadge.textContent = 'Online';
+      envBadge.className = 'badge badge-secondary';
+    }
+  }
+
+  if (storageBadge) {
+    if (authUiState.backendInfo) {
+      const isDurable = authUiState.backendInfo.isDurable;
+      storageBadge.textContent = isDurable ? 'Upstash Redis (Durable CAS)' : 'Local JSON Store';
+      storageBadge.className = isDurable ? 'badge badge-success' : 'badge badge-secondary';
+    } else {
+      storageBadge.textContent = 'Standard';
+      storageBadge.className = 'badge badge-secondary';
+    }
+  }
+}
+
+function setupDeveloperSettingsModal() {
+  const settingsModal = document.getElementById('settingsModal');
+  if (!settingsModal) return;
+
+  const openSettingsBtns = document.querySelectorAll('#openSettingsBtn, #sidebarSettingsBtn, #inspectorOpenSettingsBtn');
+  openSettingsBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const inspectorModal = document.getElementById('inspectorModal');
+      if (inspectorModal && inspectorModal.open) {
+        inspectorModal.close();
+      }
+
+      const errBox = document.getElementById('settingsErrorMessage');
+      if (errBox) errBox.style.display = 'none';
+
+      const keyInput = document.getElementById('settingsApiKeyInput');
+      if (keyInput) {
+        keyInput.value = '';
+        keyInput.type = 'password';
+      }
+
+      const toggleBtn = document.getElementById('toggleApiKeyVisibilityBtn');
+      if (toggleBtn) toggleBtn.textContent = 'Show';
+
+      await fetchBackendInfo();
+      updateSettingsModalUi();
+      settingsModal.showModal();
+      if (keyInput) keyInput.focus();
+    });
+  });
+
+  // Toggle Password Masking
+  const toggleBtn = document.getElementById('toggleApiKeyVisibilityBtn');
+  const keyInput = document.getElementById('settingsApiKeyInput');
+  if (toggleBtn && keyInput) {
+    toggleBtn.addEventListener('click', () => {
+      const isPassword = keyInput.type === 'password';
+      keyInput.type = isPassword ? 'text' : 'password';
+      toggleBtn.textContent = isPassword ? 'Hide' : 'Show';
+    });
+  }
+
+  // Clear Key Button
+  const clearBtn = document.getElementById('clearSettingsKeyBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (state.mcpClient) {
+        state.mcpClient.clearApiKey();
+      }
+      if (keyInput) keyInput.value = '';
+      const errBox = document.getElementById('settingsErrorMessage');
+      if (errBox) errBox.style.display = 'none';
+
+      setAuthStatus('not_configured', 'API key cleared from memory. Read-only mode active.');
+      showToast('API key removed from session memory.', 'info');
+    });
+  }
+
+  // Apply Key (Form Submit)
+  const settingsForm = document.getElementById('settingsForm');
+  if (settingsForm) {
+    settingsForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const entered = keyInput ? keyInput.value.trim() : '';
+      const errBox = document.getElementById('settingsErrorMessage');
+
+      if (!entered) {
+        if (errBox) {
+          errBox.textContent = 'Please enter an API key or use Clear Key to reset credentials.';
+          errBox.style.display = 'block';
+        }
+        return;
+      }
+
+      // 1. Hold key strictly in memory on client
+      state.mcpClient.setApiKey(entered);
+
+      // 2. Clear input immediately from DOM
+      keyInput.value = '';
+      keyInput.type = 'password';
+      if (toggleBtn) toggleBtn.textContent = 'Show';
+      if (errBox) errBox.style.display = 'none';
+
+      setAuthStatus('configured', 'API key configured in application memory. Verifying connection...');
+
+      // 3. Test verification against MCP endpoint
+      try {
+        await state.mcpClient.connect();
+        setAuthStatus('connected', 'Connected and authenticated with MCP Gateway.');
+        showToast('API key verified and applied to session memory!', 'success');
+        await refreshAllData();
+        settingsModal.close();
+      } catch (connErr) {
+        if (connErr.message && connErr.message.includes('401')) {
+          setAuthStatus('auth_failed', 'Authentication failed (HTTP 401): Invalid API key.');
+          if (errBox) {
+            errBox.textContent = 'Authentication failed: The entered API key was rejected by the server.';
+            errBox.style.display = 'block';
+          }
+          showToast('Authentication failed: Invalid API key', 'error');
+        } else {
+          setAuthStatus('configured', `Configured in memory (Gateway notice: ${connErr.message})`);
+          showToast(`Applied in memory. Gateway notice: ${connErr.message}`, 'warning');
+        }
+      }
+    });
+  }
+}
+
+// ==========================================================================
 // MODAL DIALOGS SETUP & SUBMISSION
 // ==========================================================================
 
@@ -647,6 +857,9 @@ function setupModals() {
   const projectModal = document.getElementById('projectModal');
   const taskModal = document.getElementById('taskModal');
   const inspectorModal = document.getElementById('inspectorModal');
+
+  // Developer Settings modal
+  setupDeveloperSettingsModal();
 
   // Triggers
   document.querySelectorAll('.trigger-new-project, #openNewProjectBtn').forEach(btn => {
@@ -724,7 +937,12 @@ function setupModals() {
         projectModal.close();
         await refreshAllData();
       } catch (err) {
-        showToast(`Project operation failed: ${err.message}`, 'error');
+        if (err.message && (err.message.includes('401') || err.message.includes('Authentication'))) {
+          setAuthStatus('auth_failed', 'Authentication required: Mutating operation rejected (HTTP 401).');
+          showToast('Authentication required: Mutating operations require an API key. Open Settings to configure.', 'warning');
+        } else {
+          showToast(`Project operation failed: ${err.message}`, 'error');
+        }
       }
     });
   }
@@ -760,7 +978,12 @@ function setupModals() {
         taskModal.close();
         await refreshAllData();
       } catch (err) {
-        showToast(`Task creation failed: ${err.message}`, 'error');
+        if (err.message && (err.message.includes('401') || err.message.includes('Authentication'))) {
+          setAuthStatus('auth_failed', 'Authentication required: Mutating operation rejected (HTTP 401).');
+          showToast('Authentication required: Mutating operations require an API key. Open Settings to configure.', 'warning');
+        } else {
+          showToast(`Task creation failed: ${err.message}`, 'error');
+        }
       }
     });
   }
@@ -1199,10 +1422,22 @@ function setupInspector() {
 }
 
 function recordTelemetry(event, payload) {
+  // Defense-in-depth: clone and redact sensitive authorization headers from telemetry
+  let safePayload = payload;
+  if (payload && typeof payload === 'object') {
+    if (payload.headers) {
+      const sanitized = { ...payload.headers };
+      if (sanitized['Authorization']) sanitized['Authorization'] = 'Bearer [REDACTED]';
+      if (sanitized['authorization']) sanitized['authorization'] = 'Bearer [REDACTED]';
+      if (sanitized['x-api-key']) sanitized['x-api-key'] = '[REDACTED]';
+      safePayload = { ...payload, headers: sanitized };
+    }
+  }
+
   const entry = {
     timestamp: new Date().toLocaleTimeString(),
     event,
-    payload
+    payload: safePayload
   };
   state.telemetryLog.push(entry);
 
@@ -1211,7 +1446,7 @@ function recordTelemetry(event, payload) {
 
   const div = document.createElement('div');
   div.className = `telemetry-entry event-${event}`;
-  div.innerHTML = `<strong>[${entry.timestamp}] ${event.toUpperCase()}</strong>: ${escapeHtml(JSON.stringify(payload))}`;
+  div.innerHTML = `<strong>[${entry.timestamp}] ${event.toUpperCase()}</strong>: ${escapeHtml(JSON.stringify(safePayload))}`;
   logContainer.appendChild(div);
   logContainer.scrollTop = logContainer.scrollHeight;
 }
@@ -1235,6 +1470,17 @@ function updateInspectorModal() {
 
   document.getElementById('inspectorSessionId').textContent = client.sessionId || 'None (Stateless)';
   document.getElementById('inspectorToolsCount').textContent = client.tools?.length || 0;
+
+  const authBadge = document.getElementById('inspectorAuthStatusBadge');
+  if (authBadge) {
+    if (client.hasApiKey()) {
+      authBadge.className = 'badge badge-success';
+      authBadge.textContent = 'Configured (In-Memory)';
+    } else {
+      authBadge.className = 'badge badge-secondary';
+      authBadge.textContent = 'In-Memory (None)';
+    }
+  }
 
   const toolsList = document.getElementById('inspectorToolsList');
   if (toolsList && client.tools) {

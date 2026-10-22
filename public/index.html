@@ -46,6 +46,10 @@
       </div>
 
       <div class="header-actions">
+        <button id="openSettingsBtn" class="btn btn-secondary btn-sm" title="Configure developer credentials and API key" aria-label="Open Developer Settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          Settings
+        </button>
         <button id="openInspectorBtn" class="btn btn-secondary btn-sm" title="Open real-time MCP protocol inspector">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
           MCP Inspector
@@ -107,6 +111,10 @@
         </nav>
 
         <div class="sidebar-footer">
+          <button id="sidebarSettingsBtn" class="sidebar-action-btn" title="Configure developer credentials and API key" aria-label="Open Developer Settings">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <span>Developer Settings</span>
+          </button>
           <div class="track-badge">
             <span class="track-tag">Amazon Hackathon 2026</span>
             <span class="track-sub">Alexa+ Track Submission</span>
@@ -786,6 +794,7 @@
         <div class="info-pill"><span class="pill-label">Protocol Version:</span> <code id="inspectorProtocolVersion">2025-11-25</code></div>
         <div class="info-pill"><span class="pill-label">Session ID:</span> <code id="inspectorSessionId">Connecting...</code></div>
         <div class="info-pill"><span class="pill-label">Tools Discovered:</span> <span id="inspectorToolsCount" class="badge">12</span></div>
+        <div class="info-pill"><span class="pill-label">Auth Credential:</span> <span id="inspectorAuthStatusBadge" class="badge badge-secondary">In-Memory (None)</span></div>
       </div>
 
       <div class="inspector-tabs">
@@ -807,8 +816,77 @@
       </div>
 
       <div class="dialog-actions">
+        <button type="button" id="inspectorOpenSettingsBtn" class="btn btn-secondary" style="margin-right:auto;">Configure API Key</button>
         <button type="button" class="btn btn-secondary" onclick="document.getElementById('inspectorModal').close()">Close Inspector</button>
       </div>
+    </div>
+  </dialog>
+
+  <!-- 4. Developer Settings & Authentication Modal -->
+  <dialog id="settingsModal" class="app-dialog" closedby="any" aria-labelledby="settingsModalTitle">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <div>
+          <h2 id="settingsModalTitle" class="dialog-title">Developer Settings</h2>
+          <p class="dialog-subtitle">Configure developer authentication credentials for MCP mutating operations.</p>
+        </div>
+        <button type="button" class="btn-close" onclick="document.getElementById('settingsModal').close()" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <div class="settings-connection-card">
+        <div class="settings-status-row">
+          <span class="settings-status-label">Authentication Status:</span>
+          <span id="settingsAuthStatusBadge" class="badge badge-secondary">Not configured</span>
+        </div>
+        <div class="settings-status-row">
+          <span class="settings-status-label">Server Environment:</span>
+          <span id="settingsServerEnvBadge" class="badge badge-secondary">Checking...</span>
+        </div>
+        <div class="settings-status-row">
+          <span class="settings-status-label">Storage Backend:</span>
+          <span id="settingsStorageBackendBadge" class="badge badge-secondary">Checking...</span>
+        </div>
+        <div class="settings-status-desc" id="settingsStatusExplanation">
+          No API key is held in application memory. Read-only inspection is active; mutating operations require authentication in production.
+        </div>
+      </div>
+
+      <form id="settingsForm" class="dialog-form" onsubmit="event.preventDefault();">
+        <div class="form-group">
+          <label for="settingsApiKeyInput">MCP API Key (Bearer Token)</label>
+          <div class="input-with-button">
+            <input
+              type="password"
+              id="settingsApiKeyInput"
+              class="input-field"
+              placeholder="Enter MCP_API_KEY..."
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="settingsApiKeyHelp"
+            />
+            <button type="button" id="toggleApiKeyVisibilityBtn" class="btn btn-secondary btn-sm" aria-label="Toggle API key visibility" title="Toggle visibility">
+              Show
+            </button>
+          </div>
+          <small id="settingsApiKeyHelp" class="form-help">
+            Held strictly in application memory for the current page session. Never saved to localStorage, sessionStorage, IndexedDB, cookies, or logs.
+          </small>
+        </div>
+
+        <div id="settingsErrorMessage" class="form-error-box" style="display:none;" role="alert"></div>
+
+        <div class="dialog-actions">
+          <button type="button" id="clearSettingsKeyBtn" class="btn btn-danger" style="margin-right:auto;" disabled>
+            Clear Key
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('settingsModal').close()">
+            Close
+          </button>
+          <button type="submit" id="saveSettingsBtn" class="btn btn-primary">
+            Apply Key
+          </button>
+        </div>
+      </form>
     </div>
   </dialog>
 

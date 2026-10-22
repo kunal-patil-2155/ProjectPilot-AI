@@ -2459,3 +2459,87 @@ dialog.dialog-wide {
 .audit-table tr:hover td {
   background: rgba(255, 255, 255, 0.02);
 }
+
+/* --------------------------------------------------------------------------
+   25. DEVELOPER SETTINGS MODAL & AUTHENTICATION UI
+   -------------------------------------------------------------------------- */
+.settings-connection-card {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+}
+
+.settings-status-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.settings-status-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.input-with-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input-with-button .input-field {
+  flex: 1;
+}
+
+.form-error-box {
+  background: var(--status-rose-subtle);
+  border: 1px solid var(--status-rose-border);
+  color: var(--status-rose);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.form-help {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.sidebar-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-action-btn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}

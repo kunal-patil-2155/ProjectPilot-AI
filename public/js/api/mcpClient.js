@@ -14,7 +14,7 @@ export class McpBrowserClient {
   constructor(endpoint = '/mcp', options = {}) {
     this.endpoint = endpoint;
     const opts = typeof options === 'string' ? { apiKey: options } : options;
-    this.apiKey = opts.apiKey || null;
+    this.apiKey = opts.apiKey ? String(opts.apiKey).trim() : null;
     this.sessionId = null;
     this.protocolVersion = '2025-11-25';
     this.connected = false;
@@ -25,11 +25,44 @@ export class McpBrowserClient {
   }
 
   /**
-   * Set or update authentication credential.
+   * Set or update authentication credential in memory.
    * @param {string|null} key
    */
   setApiKey(key) {
-    this.apiKey = key || null;
+    this.apiKey = key ? String(key).trim() : null;
+  }
+
+  /**
+   * Remove authentication credential from memory.
+   */
+  clearApiKey() {
+    this.apiKey = null;
+  }
+
+  /**
+   * Check if client currently holds an authentication credential in memory.
+   * @returns {boolean}
+   */
+  hasApiKey() {
+    return Boolean(this.apiKey && this.apiKey.length > 0);
+  }
+
+  /**
+   * Return a copy of headers with sensitive authorization tokens redacted.
+   */
+  _sanitizeHeaders(headers) {
+    if (!headers) return headers;
+    const sanitized = { ...headers };
+    if (sanitized['Authorization']) {
+      sanitized['Authorization'] = 'Bearer [REDACTED]';
+    }
+    if (sanitized['authorization']) {
+      sanitized['authorization'] = 'Bearer [REDACTED]';
+    }
+    if (sanitized['x-api-key']) {
+      sanitized['x-api-key'] = '[REDACTED]';
+    }
+    return sanitized;
   }
 
   /**
@@ -95,7 +128,7 @@ export class McpBrowserClient {
     const headers = this._buildHeaders();
     this._emit('request', {
       method: 'initialize',
-      headers,
+      headers: this._sanitizeHeaders(headers),
       body: initPayload
     });
 
@@ -133,7 +166,7 @@ export class McpBrowserClient {
     };
 
     const notifyHeaders = this._buildHeaders();
-    this._emit('request', { method: 'notifications/initialized', headers: notifyHeaders, body: notifyPayload });
+    this._emit('request', { method: 'notifications/initialized', headers: this._sanitizeHeaders(notifyHeaders), body: notifyPayload });
 
     await fetch(this.endpoint, {
       method: 'POST',
@@ -169,7 +202,7 @@ export class McpBrowserClient {
     };
 
     const headers = this._buildHeaders();
-    this._emit('request', { method: 'tools/list', headers, body: payload });
+    this._emit('request', { method: 'tools/list', headers: this._sanitizeHeaders(headers), body: payload });
 
     const res = await fetch(this.endpoint, {
       method: 'POST',
@@ -218,7 +251,7 @@ export class McpBrowserClient {
     };
 
     const headers = this._buildHeaders();
-    this._emit('tool_call_start', { name, args, payload, headers });
+    this._emit('tool_call_start', { name, args, payload, headers: this._sanitizeHeaders(headers) });
 
     const res = await fetch(this.endpoint, {
       method: 'POST',

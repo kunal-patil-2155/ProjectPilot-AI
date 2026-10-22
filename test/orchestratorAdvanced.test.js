@@ -66,6 +66,113 @@ describe('Advanced Conversational Orchestration & Execution Modes (Phases 3 & 4)
       // Switch back to APPROVE for subsequent tests
       orchestrator.setExecutionMode('APPROVE');
     });
+
+    test('ASK mode: complete task returns advisory plan without mutating task status or calling write tools', async () => {
+      orchestrator.setExecutionMode('ASK');
+
+      const outcome = await orchestrator.process('Complete task task-cloudsync-1');
+      assert.equal(outcome.workflow, 'complete_task_plan');
+      assert.ok(!outcome.toolCalls.some(tc => tc.name === 'update_task_status'), 'Write tool update_task_status must NOT be called in ASK mode');
+      assert.ok(outcome.explanation.includes('Proposed Task Completion (ASK Mode)'));
+      assert.ok(outcome.explanation.includes('task-cloudsync-1'));
+      assert.ok(outcome.explanation.includes('DONE'));
+      assert.ok(!outcome.explanation.includes('Confirmed:'), 'Must not claim task was confirmed done');
+
+      // Verify task in persistent store remains untouched (still todo)
+      const tasksRes = await client.callTool('list_tasks', { projectId: 'proj-cloudsync' });
+      const targetTask = tasksRes.data.tasks.find(t => t.id === 'task-cloudsync-1');
+      assert.ok(targetTask);
+      assert.equal(targetTask.status, 'in_progress', 'Task status must remain in_progress in store');
+      assert.equal(targetTask.completedAt, null);
+
+      orchestrator.setExecutionMode('APPROVE');
+    });
+
+    test('ASK mode: reopen task returns advisory plan without mutating task status', async () => {
+      // Mark task as done directly first
+      await client.callTool('update_task_status', { taskId: 'task-cloudsync-1', status: 'done' });
+
+      orchestrator.setExecutionMode('ASK');
+
+      const outcome = await orchestrator.process('reopen task task-cloudsync-1');
+      assert.equal(outcome.workflow, 'reopen_task_plan');
+      assert.ok(!outcome.toolCalls.some(tc => tc.name === 'update_task_status'), 'Write tool update_task_status must NOT be called in ASK mode');
+      assert.ok(outcome.explanation.includes('Proposed Task Reopen (ASK Mode)'));
+      assert.ok(outcome.explanation.includes('TODO'));
+      assert.ok(!outcome.explanation.includes('Reopened Successfully'));
+
+      // Verify task in persistent store remains done
+      const tasksRes = await client.callTool('list_tasks', { projectId: 'proj-cloudsync' });
+      const targetTask = tasksRes.data.tasks.find(t => t.id === 'task-cloudsync-1');
+      assert.ok(targetTask);
+      assert.equal(targetTask.status, 'done', 'Task status must remain done in store');
+
+      orchestrator.setExecutionMode('APPROVE');
+    });
+
+    test('Ambiguous task identity does not mutate tasks', async () => {
+      orchestrator.setExecutionMode('ASK');
+
+      // Ambiguous complete query matching multiple tasks
+      const ambigComplete = await orchestrator.process('complete task task');
+      assert.equal(ambigComplete.workflow, 'complete_task_ambiguous');
+      assert.ok(ambigComplete.clarificationOptions?.length > 1);
+      assert.ok(!ambigComplete.toolCalls.some(tc => tc.name === 'update_task_status'));
+
+      // Ambiguous reopen query matching multiple tasks
+      const ambigReopen = await orchestrator.process('reopen task task');
+      assert.equal(ambigReopen.workflow, 'reopen_task_ambiguous');
+      assert.ok(ambigReopen.clarificationOptions?.length > 1);
+      assert.ok(!ambigReopen.toolCalls.some(tc => tc.name === 'update_task_status'));
+
+      orchestrator.setExecutionMode('APPROVE');
+    });
+
+    test('AUTOPILOT mode preserves direct execution with verification', async () => {
+      orchestrator.setExecutionMode('AUTOPILOT');
+
+      // Reopen task
+      const reopenRes = await orchestrator.process('reopen task task-cloudsync-1');
+      assert.equal(reopenRes.workflow, 'reopen_task');
+      assert.ok(reopenRes.toolCalls.some(tc => tc.name === 'update_task_status'));
+      assert.ok(reopenRes.explanation.includes('Task Reopened Successfully'));
+
+      let tasksRes = await client.callTool('list_tasks', { projectId: 'proj-cloudsync' });
+      let targetTask = tasksRes.data.tasks.find(t => t.id === 'task-cloudsync-1');
+      assert.equal(targetTask.status, 'todo');
+
+      // Complete task
+      const completeRes = await orchestrator.process('Complete task task-cloudsync-1');
+      assert.equal(completeRes.workflow, 'complete_task');
+      assert.ok(completeRes.toolCalls.some(tc => tc.name === 'update_task_status'));
+      assert.ok(completeRes.explanation.includes('DONE'));
+
+      tasksRes = await client.callTool('list_tasks', { projectId: 'proj-cloudsync' });
+      targetTask = tasksRes.data.tasks.find(t => t.id === 'task-cloudsync-1');
+      assert.equal(targetTask.status, 'done');
+
+      orchestrator.setExecutionMode('APPROVE');
+    });
+
+    test('APPROVE mode gating: autonomous multi-step rescue requires explicit approval', async () => {
+      orchestrator.setExecutionMode('APPROVE');
+
+      // 1. Staging a rescue plan produces preview card with zero mutating write calls
+      const prep = await orchestrator.process('Rescue project Mobile Checkout SDK');
+      assert.equal(prep.workflow, 'rescue_plan');
+      assert.equal(prep.isApprovalCard, true);
+      assert.ok(!prep.toolCalls.some(tc => tc.name === 'update_task_status' || tc.name === 'update_project'));
+
+      // 2. Cancellation leaves state completely untouched
+      const cancel = await orchestrator.process('cancel plan');
+      assert.equal(cancel.workflow, 'rescue_plan_cancelled');
+
+      // 3. Verify no mutation occurred on tasks
+      const tasksRes = await client.callTool('list_tasks', { projectId: 'proj-checkout' });
+      const blockedTask = tasksRes.data.tasks.find(t => t.id === 'task-checkout-oauth');
+      assert.ok(blockedTask);
+      assert.equal(blockedTask.status, 'blocked');
+    });
   });
 
   describe('2. GitHub Repository Intelligence Workflow', () => {

@@ -48,7 +48,7 @@ export class ProjectStore {
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
-        throw new Error(`Failed to read data store at ${this.filePath}: ${err.message}`);
+        throw new Error(`Failed to read data store: ${err.message}`);
       }
     }
 
@@ -63,16 +63,22 @@ export class ProjectStore {
 
   /**
    * Atomically persists current state to disk.
+   * If newData is provided, updates memory ONLY after disk write succeeds.
+   * @param {Object} [newData]
    */
-  async _saveAtomic() {
+  async _saveAtomic(newData = null) {
+    const payload = newData || this.data;
     const dir = path.dirname(this.filePath);
     await fs.promises.mkdir(dir, { recursive: true });
 
     const tempPath = `${this.filePath}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-    const serialized = JSON.stringify(this.data, null, 2);
+    const serialized = JSON.stringify(payload, null, 2);
 
     await fs.promises.writeFile(tempPath, serialized, 'utf8');
     await fs.promises.rename(tempPath, this.filePath);
+    if (newData) {
+      this.data = newData;
+    }
   }
 
   // ==========================================
@@ -166,8 +172,11 @@ export class ProjectStore {
       updatedAt: now
     };
 
-    this.data.projects.push(newProject);
-    await this._saveAtomic();
+    const nextData = {
+      ...this.data,
+      projects: [...this.data.projects, newProject]
+    };
+    await this._saveAtomic(nextData);
     return newProject;
   }
 
@@ -715,4 +724,44 @@ export class ProjectStore {
     this.data = getSampleData();
     await this._saveAtomic();
   }
+}
+
+/**
+ * Universal Store Factory
+ * Automatically instantiates UpstashRedisStore when remote persistence is configured,
+ * or ProjectStore for local JSON file storage.
+ * @param {Object} options
+ */
+export async function createStore(options = {}) {
+  const isProduction = options.isProduction !== undefined
+    ? options.isProduction
+    : (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL));
+
+  const rawUrl = options.url || options.upstashUrl || process.env.UPSTASH_REDIS_REST_URL;
+  const rawToken = options.token || options.upstashToken || process.env.UPSTASH_REDIS_REST_TOKEN;
+  const useRedis = options.backend === 'redis' || process.env.STORAGE_BACKEND === 'redis' || Boolean(rawUrl);
+
+  if (useRedis) {
+    if (!rawUrl || !rawToken) {
+      throw new Error('Durable persistence configuration error: UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required for remote storage.');
+    }
+    const { UpstashRedisStore } = await import('./upstashStore.js');
+    const store = new UpstashRedisStore({
+      url: rawUrl,
+      token: rawToken,
+      storeKey: options.storeKey || process.env.UPSTASH_REDIS_STORE_KEY,
+      timeoutMs: options.timeoutMs,
+      fetchFn: options.fetchFn
+    });
+    await store.init();
+    return store;
+  }
+
+  if (isProduction && process.env.REQUIRE_DURABLE_STORAGE === 'true') {
+    throw new Error('Durable persistence configuration error: Durable storage is required in production, but UPSTASH_REDIS_REST_URL is not configured.');
+  }
+
+  const store = new ProjectStore(options.storePath || options.filePath);
+  await store.init();
+  return store;
 }

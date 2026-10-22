@@ -11,8 +11,9 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import crypto, { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ProjectStore } from './db/store.js';
-import { createProjectPilotMcpServer } from './mcp/server.js';
+import { ProjectStore, createStore } from './db/store.js';
+import { UpstashRedisStore } from './db/upstashStore.js';
+import { createProjectPilotMcpServer, MUTATING_TOOL_NAMES } from './mcp/server.js';
 import { RateLimiter } from './security/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,6 +34,28 @@ const MIME_TYPES = {
 };
 
 /**
+ * Constant-time comparison of two secret tokens using fixed-length SHA-256 digests.
+ * Eliminates unequal-buffer-length timing leak side channels.
+ *
+ * @param {string} candidate - Supplied candidate token
+ * @param {string} expected - Configured expected secret token
+ * @returns {boolean} True if both tokens are non-empty strings and match exactly
+ */
+export function secureCompareTokens(candidate, expected) {
+  if (typeof candidate !== 'string' || typeof expected !== 'string') {
+    return false;
+  }
+  if (!candidate || !expected) {
+    return false;
+  }
+
+  const candidateDigest = crypto.createHash('sha256').update(Buffer.from(candidate, 'utf8')).digest();
+  const expectedDigest = crypto.createHash('sha256').update(Buffer.from(expected, 'utf8')).digest();
+
+  return crypto.timingSafeEqual(candidateDigest, expectedDigest);
+}
+
+/**
  * Creates and configures the ProjectPilot HTTP Server.
  * @param {Object} options
  * @param {string} options.storePath - Optional path for JSON store
@@ -41,25 +64,43 @@ const MIME_TYPES = {
  * @param {Object} options.rateLimit - Optional rate limiting options { windowMs, maxRequests, enabled }
  */
 export async function createServer(options = {}) {
+  const isProduction = options.isProduction !== undefined
+    ? options.isProduction
+    : (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL));
+
   const defaultStorePath = process.env.VERCEL
     ? path.join(os.tmpdir(), 'projectpilot-store.json')
     : path.resolve(__dirname, '..', 'data', 'store.json');
   const storePath = options.storePath || defaultStorePath;
 
-  // On serverless environments (e.g. Vercel), copy seed data to /tmp if it doesn't exist
-  if (process.env.VERCEL && !fs.existsSync(storePath)) {
-    const seedPath = path.resolve(__dirname, '..', 'data', 'store.json');
-    if (fs.existsSync(seedPath)) {
-      try {
-        fs.copyFileSync(seedPath, storePath);
-      } catch {
-        // Fallback: store.init() will initialize if missing
+  let store;
+  if (options.store) {
+    store = options.store;
+  } else {
+    // On serverless environments (e.g. Vercel) using local file fallback, copy seed data if needed
+    if (process.env.VERCEL && !fs.existsSync(storePath) && !process.env.UPSTASH_REDIS_REST_URL && !options.url && !options.upstashUrl) {
+      const seedPath = path.resolve(__dirname, '..', 'data', 'store.json');
+      if (fs.existsSync(seedPath)) {
+        try {
+          fs.copyFileSync(seedPath, storePath);
+        } catch {
+          // Fallback: store.init() will initialize if missing
+        }
       }
     }
+
+    store = await createStore({
+      ...options,
+      storePath,
+      isProduction
+    });
   }
 
-  const store = new ProjectStore(storePath);
-  await store.init();
+  const isDurable = Boolean(
+    options.isDurable === true ||
+    (store && store.constructor && store.constructor.name === 'UpstashRedisStore') ||
+    (store && typeof store._command === 'function')
+  );
 
   // Authentication: configured via options.apiKey or MCP_API_KEY environment variable
   const apiKey = options.apiKey !== undefined
@@ -96,14 +137,17 @@ export async function createServer(options = {}) {
       return false; // Origin not allowed
     }
 
-    // Default development policy: allow localhost, 127.0.0.1, Vercel deployments, and same-host
+    // Default development policy: allow localhost, 127.0.0.1, project-specific Vercel deployments, and same-host
     try {
       const parsedOrigin = new URL(origin);
       const host = parsedOrigin.hostname;
       if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
         return origin;
       }
-      if (host.endsWith('.vercel.app')) {
+      if (
+        host === 'project-pilot-ai-rho-blue.vercel.app' ||
+        (host.startsWith('project-pilot-ai-') && host.endsWith('.vercel.app'))
+      ) {
         return origin;
       }
       const reqHost = req.headers.host ? req.headers.host.split(':')[0] : null;
@@ -145,11 +189,6 @@ export async function createServer(options = {}) {
    * Validate authentication credentials against expected API key (constant-time).
    */
   function authenticateRequest(req) {
-    if (!apiKey) {
-      // Open / local development mode
-      return { authenticated: true };
-    }
-
     const authHeader = req.headers['authorization'];
     let token = null;
 
@@ -159,20 +198,32 @@ export async function createServer(options = {}) {
       token = String(req.headers['x-api-key']).trim();
     }
 
-    if (!token) {
-      return {
-        authenticated: false,
-        message: 'Authentication required: missing Bearer token or x-api-key header'
-      };
+    if (apiKey) {
+      if (!token) {
+        return {
+          authenticated: false,
+          status: 401,
+          message: 'Authentication required: missing Bearer token or x-api-key header'
+        };
+      }
+
+      if (!secureCompareTokens(token, apiKey)) {
+        return {
+          authenticated: false,
+          status: 401,
+          message: 'Authentication failed: invalid API key'
+        };
+      }
+
+      return { authenticated: true };
     }
 
-    const tokenBuf = Buffer.from(token, 'utf8');
-    const expectedBuf = Buffer.from(apiKey, 'utf8');
-
-    if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+    if (isProduction) {
       return {
         authenticated: false,
-        message: 'Authentication failed: invalid API key'
+        noKeyInProduction: true,
+        status: 401,
+        message: 'Authentication required: MCP_API_KEY must be configured in production for mutating operations.'
       };
     }
 
@@ -226,9 +277,14 @@ export async function createServer(options = {}) {
 
     // 3. MCP Streamable HTTP Endpoint
     if (pathname === '/mcp') {
+      // Synchronize freshest state from remote storage before processing request
+      if (typeof store.sync === 'function') {
+        await store.sync().catch(() => {});
+      }
+
       // A. Authentication Verification
       const auth = authenticateRequest(req);
-      if (!auth.authenticated) {
+      if (apiKey && !auth.authenticated) {
         res.writeHead(401, {
           'Content-Type': 'application/json',
           'WWW-Authenticate': 'Bearer realm="ProjectPilot MCP Gateway"'
@@ -275,6 +331,62 @@ export async function createServer(options = {}) {
           return;
         }
 
+        // Read and parse payload to check authorization and mutations
+        let parsedBody = req.body;
+        if (!parsedBody) {
+          const chunks = [];
+          for await (const chunk of req) {
+            chunks.push(chunk);
+          }
+          const rawText = Buffer.concat(chunks).toString('utf8');
+          try {
+            parsedBody = JSON.parse(rawText);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32700, message: 'Parse error: Invalid JSON' },
+              id: null
+            }));
+            return;
+          }
+        }
+
+        const isToolCall = parsedBody?.method === 'tools/call';
+        const toolName = parsedBody?.params?.name;
+        const isMutating = isToolCall && MUTATING_TOOL_NAMES.has(toolName);
+
+        // Security Guard 1: In production without durable persistence, refuse mutating operations
+        if (isProduction && !isDurable && isMutating) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: `Service Unavailable: Durable persistence is not configured in this production environment. Mutating operation '${toolName}' is disabled to prevent data loss.`
+            },
+            id: parsedBody?.id || null
+          }));
+          return;
+        }
+
+        // Security Guard 2: In production without configured key, refuse mutating operations
+        if (isProduction && !apiKey && isMutating) {
+          res.writeHead(401, {
+            'Content-Type': 'application/json',
+            'WWW-Authenticate': 'Bearer realm="ProjectPilot MCP Gateway"'
+          });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: `Authentication required: Mutating operation '${toolName}' is forbidden in production when MCP_API_KEY is not configured.`
+            },
+            id: parsedBody?.id || null
+          }));
+          return;
+        }
+
         let transport;
         if (sessionId) {
           const session = sessions.get(sessionId);
@@ -293,7 +405,15 @@ export async function createServer(options = {}) {
             sessionIdGenerator: () => randomUUID(),
             enableJsonResponse: true
           });
-          const mcpServer = createProjectPilotMcpServer(store);
+          const mcpServer = createProjectPilotMcpServer(store, {
+            enableExtended: options.enableExtended !== undefined
+              ? options.enableExtended
+              : (process.env.PROJECTPILOT_EXTENDED_TOOLS === 'true'),
+            isProduction,
+            isDurable,
+            authenticated: auth.authenticated,
+            apiKey
+          });
           await mcpServer.connect(transport);
 
           transport.onclose = () => {
@@ -304,7 +424,7 @@ export async function createServer(options = {}) {
         }
 
         try {
-          await transport.handleRequest(req, res, req.body);
+          await transport.handleRequest(req, res, parsedBody);
           if (transport.sessionId && !sessions.has(transport.sessionId)) {
             sessions.set(transport.sessionId, { transport, createdAt: Date.now() });
           }
@@ -354,6 +474,9 @@ export async function createServer(options = {}) {
 
     // 4. Diagnostic & Health Endpoint (Discloses operational stats, no secrets)
     if (pathname === '/api/info' || pathname === '/api' || pathname === '/api/') {
+      if (typeof store.sync === 'function') {
+        await store.sync().catch(() => {});
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         product: 'ProjectPilot AI',
@@ -361,6 +484,9 @@ export async function createServer(options = {}) {
         version: '1.0.0',
         protocol: 'Model Context Protocol (MCP) Streamable HTTP (2025-11-25)',
         authConfigured: Boolean(apiKey),
+        storageBackend: isDurable ? 'upstash_redis' : 'local_json',
+        isDurable,
+        isProduction,
         activeMcpSessions: sessions.size,
         dataStats: {
           projects: store.listProjects().length,
