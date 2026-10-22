@@ -119,8 +119,8 @@ The assistant orchestrates multi-step MCP tool calls and presents clean natural 
 ### Setup & Launch
 ```bash
 # Clone the repository
-git clone https://github.com/example/projectpilot-ai.git
-cd projectpilot-ai
+git clone https://github.com/kunal-patil-2155/ProjectPilot-AI.git
+cd ProjectPilot-AI
 
 # Install dependencies (@modelcontextprotocol/sdk, zod)
 npm install
