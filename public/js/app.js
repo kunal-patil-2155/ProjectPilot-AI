@@ -31,6 +31,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModals();
   setupAssistantChat();
   setupInspector();
+  setupGitHubAuditView();
+  setupAuditLogView();
 
   // Initialize MCP client with optional API key stored in sessionStorage
   const savedApiKey = typeof window !== 'undefined' ? window.sessionStorage?.getItem('projectpilot_api_key') : null;
@@ -199,6 +201,7 @@ async function refreshAllData() {
     renderTasks();
     renderHealthAndBlockers();
     renderMaintenance();
+    await renderAuditLogView();
     updateSidebarCounters();
     populateProjectDropdowns();
   } catch (err) {
@@ -853,6 +856,20 @@ function setupAssistantChat() {
     });
   }
 
+  // Execution mode selector buttons
+  const modeSelector = document.getElementById('executionModeSelector');
+  if (modeSelector) {
+    const buttons = modeSelector.querySelectorAll('.mode-btn');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.mode;
+        state.orchestrator.setExecutionMode(mode);
+        buttons.forEach(b => b.classList.toggle('active', b === btn));
+        showToast(`Execution mode set to ${mode}`, 'info');
+      });
+    });
+  }
+
   // Prompt chips
   document.querySelectorAll('.chip-prompt').forEach(chip => {
     chip.addEventListener('click', async () => {
@@ -898,7 +915,7 @@ async function executeAssistantPrompt(promptText) {
     if (msgEl) {
       let toolInvocationsHtml = '';
       if (outcome.toolCalls?.length) {
-        toolInvocationsHtml = outcome.toolCalls.map(tc => `
+        const boxes = outcome.toolCalls.map(tc => `
           <div class="tool-invocation-box">
             <div class="tool-inv-header">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
@@ -907,6 +924,18 @@ async function executeAssistantPrompt(promptText) {
             <div class="tool-inv-args">${escapeHtml(JSON.stringify(tc.args, null, 2))}</div>
           </div>
         `).join('');
+
+        toolInvocationsHtml = `
+          <details class="technical-details-disclosure">
+            <summary class="technical-details-summary">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+              <span>View Technical Execution Traces (${outcome.toolCalls.length} tool invocation(s))</span>
+            </summary>
+            <div class="technical-details-content">
+              ${boxes}
+            </div>
+          </details>
+        `;
       }
 
       let clarificationButtons = '';
@@ -1222,6 +1251,162 @@ function updateInspectorModal() {
 }
 
 // ==========================================================================
+// GITHUB REPOSITORY AUDIT & FINDINGS VIEW
+// ==========================================================================
+
+function setupGitHubAuditView() {
+  const form = document.getElementById('githubInspectForm');
+  const input = document.getElementById('githubRepoInput');
+  const resultsCard = document.getElementById('githubAuditResults');
+  const content = document.getElementById('githubAuditContent');
+  const badge = document.getElementById('githubAssessmentBadge');
+  const title = document.getElementById('githubAuditTitle');
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const url = input.value.trim();
+      if (!url) return;
+
+      const btn = document.getElementById('githubInspectBtn');
+      btn.disabled = true;
+      btn.textContent = 'Auditing...';
+
+      try {
+        let report;
+        try {
+          const res = await state.mcpClient.callTool('inspect_github_repo', { repoUrl: url });
+          report = res.data;
+        } catch {
+          const { GitHubService } = await import('./services/githubService.js').catch(() => ({}));
+          if (GitHubService) {
+            const gh = new GitHubService();
+            report = await gh.inspectRepository(url);
+          }
+        }
+
+        if (resultsCard && content && report) {
+          resultsCard.style.display = 'block';
+          title.textContent = `Audit: ${report.owner ? `${report.owner}/${report.repo}` : url}`;
+          if (badge) {
+            badge.textContent = report.overallAssessment || 'Audited';
+            badge.className = `badge ${report.status === 'invalid_url' || report.status === 'not_found' ? 'badge-danger' : 'badge-primary'}`;
+          }
+
+          let metaHtml = '';
+          if (report.metadata) {
+            metaHtml = `
+              <div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:16px; padding:12px; background:rgba(255,255,255,0.02); border-radius:var(--radius-md);">
+                <div><strong>Default Branch:</strong> <code>${escapeHtml(report.metadata.defaultBranch)}</code></div>
+                <div><strong>Language:</strong> ${escapeHtml(report.metadata.language)}</div>
+                <div><strong>License:</strong> ${escapeHtml(report.metadata.license)}</div>
+                <div><strong>Stars:</strong> ${report.metadata.stars}</div>
+                <div><strong>Open Issues:</strong> ${report.metadata.openIssuesCount}</div>
+              </div>
+            `;
+          }
+
+          let hygieneHtml = '';
+          if (report.fileTreeSummary) {
+            hygieneHtml = `
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:16px;">
+                <div class="card" style="padding:10px;"><strong>README:</strong> ${report.fileTreeSummary.hasReadme ? '✅ Present' : '❌ Missing'}</div>
+                <div class="card" style="padding:10px;"><strong>License File:</strong> ${report.fileTreeSummary.hasLicense ? '✅ Present' : '❌ Missing'}</div>
+                <div class="card" style="padding:10px;"><strong>.gitignore:</strong> ${report.fileTreeSummary.hasGitignore ? '✅ Present' : '❌ Missing'}</div>
+                <div class="card" style="padding:10px;"><strong>CI/CD:</strong> ${report.fileTreeSummary.ciWorkflowsCount > 0 ? `✅ ${report.fileTreeSummary.ciWorkflowsCount} Workflows` : '❌ None'}</div>
+              </div>
+            `;
+          }
+
+          const findings = Array.isArray(report.findings) ? report.findings : [];
+          let findingsHtml = '';
+          if (findings.length === 0) {
+            findingsHtml = '<div class="empty-state">No security or hygiene deficiencies discovered. Repository follows healthy baseline standards.</div>';
+          } else {
+            findingsHtml = `
+              <h3 style="margin-bottom:12px; font-size:0.95rem;">Findings (${findings.length})</h3>
+              <div class="findings-grid">
+                ${findings.map(f => `
+                  <div class="finding-card severity-${escapeHtml(f.severity)}">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                      <strong>${escapeHtml(f.title)}</strong>
+                      <span class="badge ${f.severity === 'critical' || f.severity === 'high' ? 'badge-danger' : 'badge-primary'}">${escapeHtml(f.severity.toUpperCase())}</span>
+                    </div>
+                    <div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(f.explanation)}</div>
+                    ${f.filePath ? `<div style="font-size:0.75rem; font-family:var(--font-mono); color:var(--text-muted); margin-bottom:6px;">File: ${escapeHtml(f.filePath)}</div>` : ''}
+                    <div style="font-size:0.78rem; color:var(--text-muted);"><strong>Remediation:</strong> ${escapeHtml(f.remediation)}</div>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+          }
+
+          content.innerHTML = metaHtml + hygieneHtml + findingsHtml;
+        }
+
+        showToast('Repository audit completed', 'success');
+      } catch (err) {
+        showToast(`Audit failed: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Audit Repository';
+      }
+    });
+  }
+}
+
+// ==========================================================================
+// AUDIT LOG & COMPLIANCE VIEW
+// ==========================================================================
+
+function setupAuditLogView() {
+  const refreshBtn = document.getElementById('refreshAuditBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      await renderAuditLogView();
+      showToast('Audit trail refreshed', 'success');
+      refreshBtn.disabled = false;
+    });
+  }
+}
+
+async function renderAuditLogView() {
+  const tbody = document.getElementById('auditTableBody');
+  if (!tbody || !state.mcpClient) return;
+
+  try {
+    const res = await state.mcpClient.callTool('get_audit_log', { limit: 25 });
+    const logs = res.data?.auditLogs || [];
+
+    const navBadge = document.getElementById('navAuditCount');
+    if (navBadge) navBadge.textContent = logs.length;
+
+    if (logs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No mutation events recorded yet. Mutations performed in APPROVE or AUTOPILOT mode will appear here.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = logs.map(l => {
+      const modeClass = l.mode === 'AUTOPILOT' ? 'badge-success' : (l.mode === 'APPROVE' ? 'badge-amber' : 'badge-info');
+      const timeStr = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : 'N/A';
+      return `
+        <tr>
+          <td><code style="font-size:0.75rem;">${escapeHtml(timeStr)}</code></td>
+          <td><strong>${escapeHtml(l.action)}</strong></td>
+          <td>${escapeHtml(l.actor || 'assistant')}</td>
+          <td><span class="badge ${modeClass}">${escapeHtml(l.mode || 'APPROVE')}</span></td>
+          <td>${escapeHtml(l.targetType)} <code>${escapeHtml(l.targetId || '-')}</code></td>
+          <td><span class="badge ${l.status === 'success' ? 'badge-success' : 'badge-danger'}">${escapeHtml(l.status || 'success')}</span></td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-danger">Audit trail currently empty or recording first transaction.</td></tr>`;
+  }
+}
+
+// ==========================================================================
 // UTILITIES: TOASTS, ESCAPING, MARKDOWN
 // ==========================================================================
 
@@ -1255,8 +1440,12 @@ function escapeHtml(str) {
 function formatMarkdown(str) {
   if (!str) return '';
   return escapeHtml(str)
+    .replace(/^#### (.*?)$/gm, '<h5 style="margin: 12px 0 6px; color: var(--text-primary); font-size: 0.88rem; font-weight: 700;">$1</h5>')
+    .replace(/^### (.*?)$/gm, '<h4 style="margin: 16px 0 8px; color: var(--text-primary); font-size: 0.98rem; font-weight: 700;">$1</h4>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/`(.*?)`/g, '<code style="background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.82em;">$1</code>')
+    .replace(/^[•\-] (.*?)$/gm, '<div style="margin: 3px 0; padding-left: 12px; position: relative;"><span style="position: absolute; left: 0; color: var(--accent-primary);">•</span>$1</div>')
+    .replace(/\n\n/g, '<div style="height: 8px;"></div>')
     .replace(/\n/g, '<br>');
 }

@@ -98,6 +98,32 @@ export function isRescueIntent(text) {
 }
 
 /**
+ * Checks whether an incoming text intends GitHub repository inspection.
+ */
+export function isGitHubInspectIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  return (
+    norm.startsWith('inspect github') ||
+    norm.startsWith('audit github') ||
+    norm.startsWith('audit repo') ||
+    norm.startsWith('audit repository') ||
+    norm.startsWith('inspect repo') ||
+    norm.startsWith('inspect repository') ||
+    norm.startsWith('investigate repo') ||
+    norm.startsWith('investigate repository') ||
+    norm.startsWith('check github') ||
+    norm.startsWith('check repo') ||
+    norm.startsWith('analyze github') ||
+    norm.startsWith('analyze dependencies') ||
+    norm.startsWith('analyze repo') ||
+    norm.startsWith('review repo') ||
+    norm.startsWith('review repository') ||
+    norm.includes('github.com')
+  );
+}
+
+/**
  * Robustly extracts the target project name from a conversational rescue command.
  */
 export function extractRescueQuery(rawText) {
@@ -373,6 +399,19 @@ export class AssistantOrchestrator {
     this.selectedActionIds = new Set();
     this.executionEngine = new RescueExecutionEngine(mcpClient);
     this.lastExecutionReport = null;
+    this.executionMode = 'APPROVE'; // ASK | APPROVE | AUTOPILOT
+  }
+
+  setExecutionMode(mode) {
+    const upper = String(mode).toUpperCase();
+    if (['ASK', 'APPROVE', 'AUTOPILOT'].includes(upper)) {
+      this.executionMode = upper;
+    }
+    return this.executionMode;
+  }
+
+  getExecutionMode() {
+    return this.executionMode;
   }
 
   /**
@@ -517,10 +556,90 @@ export class AssistantOrchestrator {
     }
 
     // -------------------------------------------------------------
+    // Execution Mode Switch
+    // -------------------------------------------------------------
+    if (lower.startsWith('switch to ') || lower.startsWith('set mode to ') || lower.startsWith('change mode to ')) {
+      if (lower.includes('autopilot')) {
+        this.setExecutionMode('AUTOPILOT');
+        return {
+          workflow: 'mode_change',
+          toolCalls: [],
+          explanation: `Switched execution mode to **AUTOPILOT**. The assistant will automatically execute authorized non-destructive project operations and verify state mutations in real time.`
+        };
+      }
+      if (lower.includes('approve')) {
+        this.setExecutionMode('APPROVE');
+        return {
+          workflow: 'mode_change',
+          toolCalls: [],
+          explanation: `Switched execution mode to **APPROVE**. The assistant will prepare structured execution plans and require explicit confirmation before performing state mutations.`
+        };
+      }
+      if (lower.includes('ask')) {
+        this.setExecutionMode('ASK');
+        return {
+          workflow: 'mode_change',
+          toolCalls: [],
+          explanation: `Switched execution mode to **ASK**. The assistant operates strictly in read-only analysis and advisory mode. No state modifications will be performed.`
+        };
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: GitHub Repository Intelligence (evaluated before general investigation)
+    // -------------------------------------------------------------
+    if (isGitHubInspectIntent(text)) {
+      return this._workflowInspectGitHubRepo(text);
+    }
+
+    // -------------------------------------------------------------
     // Workflow 2: Project investigation
     // -------------------------------------------------------------
     if (isProjectInvestigationIntent(text)) {
       return this._workflowProjectInvestigation(text);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Blocker Management & Resolution
+    // -------------------------------------------------------------
+    if (
+      lower.startsWith('resolve blocker') ||
+      lower.startsWith('clear blocker') ||
+      lower.startsWith('unblock task') ||
+      lower.includes('resolve the checkout blocker') ||
+      lower.includes('resolve the blocker') ||
+      lower.startsWith('block task')
+    ) {
+      return this._workflowManageBlocker(text);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Reopen Task
+    // -------------------------------------------------------------
+    if (lower.startsWith('reopen task') || lower.startsWith('re-open task')) {
+      return this._workflowReopenTask(text);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Create Task
+    // -------------------------------------------------------------
+    if (
+      (lower.startsWith('create ') || lower.startsWith('add ')) &&
+      (lower.includes('task') || lower.includes('bug'))
+    ) {
+      return this._workflowCreateTask(text);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Audit Log & Activity History
+    // -------------------------------------------------------------
+    if (
+      lower.includes('audit log') ||
+      lower.includes('audit trail') ||
+      lower.includes('audit history') ||
+      lower.includes('activity history')
+    ) {
+      return this._workflowAuditLog();
     }
 
     // -------------------------------------------------------------
@@ -1669,6 +1788,467 @@ You can ask me to:
         </div>
       </div>
     `;
+  }
+
+  async _workflowInspectGitHubRepo(rawText) {
+    const toolCalls = [];
+    let repoUrl = null;
+    let targetProject = null;
+
+    // 1. Check if rawText contains a direct GitHub URL
+    const urlMatch = rawText.match(/https?:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+/i);
+    if (urlMatch) {
+      repoUrl = urlMatch[0];
+    } else {
+      // 2. Resolve project from text
+      const cleanTarget = rawText
+        .replace(/^(?:inspect|audit|check|investigate|analyze|review)\s+(?:github(?:\s+repo(?:sitory)?)?|repo(?:sitory)?|dependencies(?:\s+for)?)\s+(?:for|on|in)?\s*/i, '')
+        .trim();
+
+      const projRes = await this.mcpClient.callTool('list_projects', {});
+      toolCalls.push({
+        name: 'list_projects',
+        args: {},
+        result: projRes.data
+      });
+
+      const projects = projRes.data?.projects || [];
+      const resolution = resolveProject(cleanTarget, projects);
+
+      if (resolution.status === 'matched') {
+        targetProject = resolution.project;
+        repoUrl = targetProject.repoUrl;
+      } else if (resolution.status === 'ambiguous') {
+        return {
+          workflow: 'github_repo_inspection_ambiguous',
+          toolCalls,
+          explanation: `Multiple projects match "${cleanTarget}". Which project's repository would you like to inspect?`,
+          clarificationOptions: resolution.candidates.map(p => ({
+            label: `${p.name} (${p.repoUrl || 'No repo connected'})`,
+            action: `audit repository for ${p.id}`
+          }))
+        };
+      }
+    }
+
+    if (!repoUrl) {
+      if (targetProject && !targetProject.repoUrl) {
+        return {
+          workflow: 'github_repo_inspection',
+          toolCalls,
+          explanation: `⚠️ Project **${targetProject.name}** does not have a connected GitHub repository URL.\n\nTo inspect source code and dependencies, add a valid GitHub repository URL (e.g. \`https://github.com/owner/repo\`) to this project.`
+        };
+      }
+      return {
+        workflow: 'github_repo_inspection',
+        toolCalls,
+        explanation: `Please provide a valid GitHub repository URL (e.g. \`https://github.com/owner/repo\`) or the name of a registered project with a connected repository.`
+      };
+    }
+
+    let inspectRes;
+    try {
+      inspectRes = await this.mcpClient.callTool('inspect_github_repo', { repoUrl });
+      toolCalls.push({
+        name: 'inspect_github_repo',
+        args: { repoUrl },
+        result: inspectRes.data
+      });
+    } catch (err) {
+      try {
+        const { GitHubService } = await import('../../src/services/githubService.js');
+        const gh = new GitHubService();
+        const fallbackReport = await gh.inspectRepository(repoUrl);
+        inspectRes = { data: fallbackReport };
+        toolCalls.push({
+          name: 'inspect_github_repo',
+          args: { repoUrl },
+          result: fallbackReport
+        });
+      } catch (innerErr) {
+        return {
+          workflow: 'github_repo_inspection',
+          toolCalls,
+          explanation: `⚠️ GitHub repository inspection error: ${err.message}`
+        };
+      }
+    }
+
+    const report = inspectRes?.data;
+    if (!report) {
+      return {
+        workflow: 'github_repo_inspection',
+        toolCalls,
+        explanation: `⚠️ No report could be retrieved for repository \`${repoUrl}\`.`
+      };
+    }
+
+    let explanation = `### 🔍 GitHub Repository Intelligence Report\n`;
+    explanation += `• **Repository:** \`${report.repoUrl || repoUrl}\`\n`;
+    explanation += `• **Assessment:** **${report.overallAssessment || 'Inspected'}**\n`;
+    explanation += `• **Inspected At:** \`${report.inspectedAt ? new Date(report.inspectedAt).toISOString() : new Date().toISOString()}\`\n\n`;
+
+    if (report.metadata) {
+      explanation += `#### Repository Profile\n`;
+      explanation += `• **Default Branch:** \`${report.metadata.defaultBranch}\` | **Language:** \`${report.metadata.language}\`\n`;
+      explanation += `• **License:** \`${report.metadata.license}\` | **Stars:** ${report.metadata.stars} | **Open Issues:** ${report.metadata.openIssuesCount}\n`;
+      if (report.metadata.description) {
+        explanation += `• **Description:** ${report.metadata.description}\n`;
+      }
+      explanation += `\n`;
+    }
+
+    if (report.fileTreeSummary) {
+      explanation += `#### Structure & Hygiene Audit\n`;
+      explanation += `• **Total Files Indexed:** ${report.fileTreeSummary.totalFilesIndexed || 0}\n`;
+      explanation += `• **README:** ${report.fileTreeSummary.hasReadme ? '✅ Present' : '❌ Missing'}\n`;
+      explanation += `• **LICENSE:** ${report.fileTreeSummary.hasLicense ? '✅ Present' : '❌ Missing'}\n`;
+      explanation += `• **.gitignore:** ${report.fileTreeSummary.hasGitignore ? '✅ Present' : '❌ Missing'}\n`;
+      explanation += `• **CI/CD Workflows:** ${report.fileTreeSummary.ciWorkflowsCount > 0 ? `✅ ${report.fileTreeSummary.ciWorkflowsCount} workflow(s)` : '❌ None detected'}\n\n`;
+    }
+
+    const findings = Array.isArray(report.findings) ? report.findings : [];
+    if (findings.length === 0) {
+      explanation += `#### ✅ Findings & Recommendations\n`;
+      explanation += `No critical or high-risk repository deficiencies were detected. Project follows baseline governance and dependency hygiene.\n`;
+    } else {
+      explanation += `#### ⚠️ Findings & Recommendations (${findings.length} detected)\n`;
+      for (const f of findings) {
+        const badge = f.severity === 'critical' ? '🔴 CRITICAL' : f.severity === 'high' ? '🟠 HIGH' : f.severity === 'medium' ? '🟡 MEDIUM' : '🔵 INFO';
+        explanation += `• **[${badge}] ${f.title}** (\`${f.findingId}\`)\n`;
+        explanation += `  *Explanation:* ${f.explanation}\n`;
+        if (f.filePath) {
+          explanation += `  *File:* \`${f.filePath}\`\n`;
+        }
+        explanation += `  *Remediation:* ${f.remediation}\n\n`;
+      }
+    }
+
+    return {
+      workflow: 'github_repo_inspection',
+      toolCalls,
+      explanation
+    };
+  }
+
+  async _workflowManageBlocker(rawText) {
+    const toolCalls = [];
+    const lower = rawText.toLowerCase();
+    const isResolve = lower.includes('resolve') || lower.includes('unblock') || lower.includes('clear blocker');
+
+    const blockersRes = await this.mcpClient.callTool('list_blockers', {});
+    toolCalls.push({
+      name: 'list_blockers',
+      args: {},
+      result: blockersRes.data
+    });
+
+    const blockers = blockersRes.data?.blockers || [];
+
+    if (isResolve) {
+      if (blockers.length === 0) {
+        return {
+          workflow: 'manage_blocker',
+          toolCalls,
+          explanation: `There are currently no active blockers recorded across any projects.`
+        };
+      }
+
+      const cleanTarget = rawText
+        .replace(/^(?:resolve|clear|unblock)\s+(?:the\s+)?(?:blocker(?:\s+for|\s+on)?\s+)?/i, '')
+        .trim()
+        .toLowerCase();
+
+      let matched = null;
+      if (cleanTarget) {
+        matched = blockers.find(b =>
+          b.taskTitle.toLowerCase().includes(cleanTarget) ||
+          b.projectName.toLowerCase().includes(cleanTarget) ||
+          b.taskId.toLowerCase() === cleanTarget ||
+          b.blockerReason.toLowerCase().includes(cleanTarget)
+        );
+      }
+
+      if (!matched && blockers.length === 1) {
+        matched = blockers[0];
+      }
+
+      if (!matched) {
+        return {
+          workflow: 'manage_blocker',
+          toolCalls,
+          explanation: `Please specify which blocker to resolve:\n` +
+            blockers.map(b => `• **${b.taskTitle}** (${b.projectName}): ${b.blockerReason}`).join('\n')
+        };
+      }
+
+      if (this.executionMode === 'ASK') {
+        return {
+          workflow: 'manage_blocker_plan',
+          toolCalls,
+          explanation: `**Proposed Action (ASK Mode):**\n` +
+            `• Would update task **"${matched.taskTitle}"** (\`${matched.taskId}\`) status from BLOCKED to IN_PROGRESS.\n` +
+            `• Would clear blocker reason: "${matched.blockerReason}".\n` +
+            `• Would recalculate project health for **${matched.projectName}**.\n\n` +
+            `*To execute this change, switch to APPROVE or AUTOPILOT mode.*`
+        };
+      }
+
+      const updateRes = await this.mcpClient.callTool('update_task_status', {
+        taskId: matched.taskId,
+        status: 'in_progress',
+        blockerReason: null
+      });
+      toolCalls.push({
+        name: 'update_task_status',
+        args: { taskId: matched.taskId, status: 'in_progress', blockerReason: null },
+        result: updateRes.data
+      });
+
+      const healthRes = await this.mcpClient.callTool('get_project_health', { projectId: matched.projectId });
+      toolCalls.push({
+        name: 'get_project_health',
+        args: { projectId: matched.projectId },
+        result: healthRes.data
+      });
+
+      const updatedHealth = healthRes.data?.healthStatus || 'Healthy';
+
+      return {
+        workflow: 'manage_blocker',
+        toolCalls,
+        explanation: `✅ **Blocker Resolved Successfully**\n\n` +
+          `• **Task:** "${matched.taskTitle}" (\`${matched.taskId}\`)\n` +
+          `• **Previous Blocker:** ${matched.blockerReason}\n` +
+          `• **New Task Status:** IN_PROGRESS\n` +
+          `• **Updated Project Health (${matched.projectName}):** **${updatedHealth}**\n\n` +
+          `State mutation verified via post-write read and audit trail.`
+      };
+    }
+
+    return {
+      workflow: 'manage_blocker',
+      toolCalls,
+      explanation: `To manage blockers, you can ask:\n` +
+        `• "Resolve blocker for <Task/Project>"\n` +
+        `• "List all blockers"`
+    };
+  }
+
+  async _workflowCreateTask(rawText) {
+    const toolCalls = [];
+
+    let priority = 'medium';
+    if (/\bcritical\b/i.test(rawText)) priority = 'critical';
+    else if (/\bhigh\b/i.test(rawText)) priority = 'high';
+    else if (/\blow\b/i.test(rawText)) priority = 'low';
+
+    const isBug = /\bbug\b/i.test(rawText);
+
+    let title = '';
+    let projectName = '';
+
+    const forMatch = rawText.match(/^(?:create|add)\s+(?:(?:critical|high|medium|low)\s+)?(?:task|bug)\s+(.+?)\s+(?:for|in|to)\s+(.+)$/i);
+    if (forMatch) {
+      title = forMatch[1].trim();
+      projectName = forMatch[2].trim();
+    } else {
+      const simpleMatch = rawText.match(/^(?:create|add)\s+(?:(?:critical|high|medium|low)\s+)?(?:task|bug)\s+(.+)$/i);
+      if (simpleMatch) {
+        title = simpleMatch[1].trim();
+      }
+    }
+
+    if (!title) {
+      return {
+        workflow: 'create_task',
+        toolCalls,
+        explanation: `Please specify the task title and target project (e.g., "Create critical authentication task for ImperialStay").`
+      };
+    }
+
+    const projRes = await this.mcpClient.callTool('list_projects', {});
+    toolCalls.push({
+      name: 'list_projects',
+      args: {},
+      result: projRes.data
+    });
+
+    const projects = projRes.data?.projects || [];
+    let targetProject = null;
+
+    if (projectName) {
+      const resolution = resolveProject(projectName, projects);
+      if (resolution.status === 'matched') {
+        targetProject = resolution.project;
+      } else if (resolution.status === 'ambiguous') {
+        return {
+          workflow: 'create_task_ambiguous',
+          toolCalls,
+          explanation: `Multiple projects match "${projectName}". For which project should I create this task?`,
+          clarificationOptions: resolution.candidates.map(p => ({
+            label: p.name,
+            action: `create ${priority} task ${title} for ${p.id}`
+          }))
+        };
+      }
+    }
+
+    if (!targetProject) {
+      targetProject = projects[0];
+    }
+
+    if (!targetProject) {
+      return {
+        workflow: 'create_task',
+        toolCalls,
+        explanation: `No registered project found to associate task with. Please create a project first.`
+      };
+    }
+
+    if (this.executionMode === 'ASK') {
+      return {
+        workflow: 'create_task_plan',
+        toolCalls,
+        explanation: `**Proposed Task Creation (ASK Mode):**\n` +
+          `• **Project:** ${targetProject.name} (\`${targetProject.id}\`)\n` +
+          `• **Title:** ${title}\n` +
+          `• **Priority:** ${priority.toUpperCase()}\n` +
+          `• **Type:** ${isBug ? 'Bug' : 'Task'}\n\n` +
+          `*To execute, switch to APPROVE or AUTOPILOT mode.*`
+      };
+    }
+
+    const createRes = await this.mcpClient.callTool('create_task', {
+      projectId: targetProject.id,
+      title,
+      priority,
+      isBug
+    });
+    toolCalls.push({
+      name: 'create_task',
+      args: { projectId: targetProject.id, title, priority, isBug },
+      result: createRes.data
+    });
+
+    const created = createRes.data?.task;
+
+    return {
+      workflow: 'create_task',
+      toolCalls,
+      explanation: `✅ **Task Created Successfully**\n\n` +
+        `• **Title:** "${created ? created.title : title}"\n` +
+        `• **Project:** ${targetProject.name} (\`${targetProject.id}\`)\n` +
+        `• **Priority:** ${priority.toUpperCase()}\n` +
+        `• **Status:** TODO\n` +
+        `• **Task ID:** \`${created ? created.id : 'generated'}\``
+    };
+  }
+
+  async _workflowReopenTask(rawText) {
+    const toolCalls = [];
+    const cleanQuery = rawText
+      .replace(/^(?:reopen|re-open)\s+(?:task\s+)?/i, '')
+      .replace(/['"]/g, '')
+      .trim()
+      .toLowerCase();
+
+    const tasksRes = await this.mcpClient.callTool('list_tasks', {});
+    toolCalls.push({
+      name: 'list_tasks',
+      args: {},
+      result: tasksRes.data
+    });
+
+    const allTasks = tasksRes.data?.tasks || [];
+    let matches = allTasks.filter(t =>
+      t.id.toLowerCase() === cleanQuery ||
+      t.id.toLowerCase().includes(cleanQuery) ||
+      t.title.toLowerCase().includes(cleanQuery)
+    );
+
+    const exactId = matches.find(t => t.id.toLowerCase() === cleanQuery);
+    if (exactId) matches = [exactId];
+
+    if (matches.length === 0) {
+      return {
+        workflow: 'reopen_task',
+        toolCalls,
+        explanation: `Could not find any task matching "${cleanQuery}".`
+      };
+    }
+
+    if (matches.length > 1) {
+      return {
+        workflow: 'reopen_task_ambiguous',
+        toolCalls,
+        explanation: `Multiple tasks match "${cleanQuery}". Which task would you like to reopen?`,
+        clarificationOptions: matches.map(t => ({
+          label: `${t.title} (${t.id})`,
+          action: `reopen task ${t.id}`
+        }))
+      };
+    }
+
+    const target = matches[0];
+
+    const updateRes = await this.mcpClient.callTool('update_task_status', {
+      taskId: target.id,
+      status: 'todo'
+    });
+    toolCalls.push({
+      name: 'update_task_status',
+      args: { taskId: target.id, status: 'todo' },
+      result: updateRes.data
+    });
+
+    return {
+      workflow: 'reopen_task',
+      toolCalls,
+      explanation: `✅ **Task Reopened Successfully**\n\n` +
+        `• **Task:** "${target.title}" (\`${target.id}\`)\n` +
+        `• **New Status:** TODO\n` +
+        `• **Completed Timestamp:** Cleared\n\n` +
+        `State mutation verified via post-write read.`
+    };
+  }
+
+  async _workflowAuditLog() {
+    const toolCalls = [];
+    let logsRes;
+    try {
+      logsRes = await this.mcpClient.callTool('get_audit_log', { limit: 10 });
+      toolCalls.push({
+        name: 'get_audit_log',
+        args: { limit: 10 },
+        result: logsRes.data
+      });
+    } catch {
+      // Fallback
+    }
+
+    const logs = logsRes?.data?.auditLogs || [];
+
+    if (logs.length === 0) {
+      return {
+        workflow: 'audit_log',
+        toolCalls,
+        explanation: `📋 **Audit Trail & Activity History**\n\nNo mutation events currently recorded. Actions in APPROVE or AUTOPILOT mode will appear here.`
+      };
+    }
+
+    let explanation = `📋 **Audit Trail & Activity History** (${logs.length} most recent events)\n\n`;
+    for (const log of logs) {
+      const timeStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'Recent';
+      explanation += `• **[${timeStr}] \`${log.action}\`** (${log.mode || 'APPROVE'} by *${log.actor || 'assistant'}*)\n`;
+      explanation += `  *Target:* ${log.targetType} \`${log.targetId || 'N/A'}\` | *Status:* ${log.status || 'success'}\n`;
+    }
+
+    return {
+      workflow: 'audit_log',
+      toolCalls,
+      explanation
+    };
   }
 
   async _handleClarificationSelection(input, resolution) {

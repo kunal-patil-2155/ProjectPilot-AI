@@ -89,6 +89,16 @@
             <span>Maintenance</span>
             <span id="navMaintenanceCount" class="nav-counter">0</span>
           </button>
+          <button class="nav-item" data-view="github">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+            <span>GitHub Audit</span>
+            <span id="navGithubCount" class="nav-counter">0</span>
+          </button>
+          <button class="nav-item" data-view="audit">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <span>Audit Trail</span>
+            <span id="navAuditCount" class="nav-counter">0</span>
+          </button>
           <button class="nav-item" data-view="assistant">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
             <span>Alexa+ Assistant</span>
@@ -450,6 +460,12 @@
               <p class="view-subtitle">Interactive developer dialogue powered by verified Model Context Protocol tools.</p>
             </div>
             <div class="view-actions">
+              <div class="execution-mode-selector" id="executionModeSelector" role="group" aria-label="Agent Execution Mode">
+                <span class="mode-label">Mode:</span>
+                <button type="button" class="mode-btn" data-mode="ASK" title="Read-only analysis and proposed action plans">ASK</button>
+                <button type="button" class="mode-btn active" data-mode="APPROVE" title="Requires explicit human approval before mutating state">APPROVE</button>
+                <button type="button" class="mode-btn" data-mode="AUTOPILOT" title="Directly executes authorized operations with real-time verification">AUTOPILOT</button>
+              </div>
               <button id="toggleVoiceBtn" class="btn btn-secondary btn-sm" title="Toggle audio voice response simulation">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
                 <span id="voiceToggleLabel">Voice: Enabled</span>
@@ -527,9 +543,11 @@
             <div class="chat-input-area">
               <div class="quick-chips-bar">
                 <button class="chip-prompt" data-prompt="What should I work on today?">⚡ Daily Priorities</button>
-                <button class="chip-prompt" data-prompt="Investigate project Mobile Checkout SDK">🔍 Investigate Checkout SDK</button>
+                <button class="chip-prompt" data-prompt="Audit repository for DevPulse Analytics">🔍 Audit DevPulse Repo</button>
+                <button class="chip-prompt" data-prompt="Resolve the checkout blocker">🛑 Resolve Blocker</button>
+                <button class="chip-prompt" data-prompt="Investigate project Mobile Checkout SDK">🔍 Investigate Checkout</button>
                 <button class="chip-prompt" data-prompt="Show remaining work">📋 Remaining Work</button>
-                <button class="chip-prompt" data-prompt="Review maintenance tasks">🔧 Maintenance Review</button>
+                <button class="chip-prompt" data-prompt="Review maintenance tasks">🔧 Maintenance</button>
               </div>
               <form id="assistantChatForm" class="chat-input-form">
                 <input type="text" id="assistantChatInput" class="input-field" placeholder="Ask a question or request a project management operation..." autocomplete="off">
@@ -538,6 +556,81 @@
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                 </button>
               </form>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 7: GITHUB INTELLIGENCE -->
+        <section id="viewGithub" class="view-panel">
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">GitHub Repository Intelligence</h1>
+              <p class="view-subtitle">Genuine remote source inspection, AST dependency analysis, CI/CD verification, and structured risk findings.</p>
+            </div>
+            <div class="view-actions">
+              <span class="badge-mcp">MCP: inspect_github_repo</span>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:20px;">
+            <div class="card-header">
+              <h2 class="card-title">🔍 Inspect Remote Repository</h2>
+            </div>
+            <div class="card-body">
+              <form id="githubInspectForm" style="display:flex; gap:12px; align-items:center;">
+                <input type="url" id="githubRepoInput" class="input-field" placeholder="https://github.com/owner/repo" style="flex:1;" required>
+                <button type="submit" id="githubInspectBtn" class="btn btn-primary">Audit Repository</button>
+              </form>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">
+                SSRF-Hardened: Only public github.com repositories are allowed. IP addresses, private subnets, and localhost are blocked.
+              </div>
+            </div>
+          </div>
+
+          <div id="githubAuditResults" class="card" style="display:none;">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2 id="githubAuditTitle" class="card-title">Inspection Results</h2>
+              <span id="githubAssessmentBadge" class="badge">Audited</span>
+            </div>
+            <div id="githubAuditContent" class="card-body">
+              <!-- Rendered dynamic findings -->
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 8: AUDIT LOG & COMPLIANCE -->
+        <section id="viewAudit" class="view-panel">
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Audit Trail & Compliance</h1>
+              <p class="view-subtitle">Durable transaction history tracking actor, execution mode, operation, timestamps, and verified state changes.</p>
+            </div>
+            <div class="view-actions">
+              <span class="badge-mcp">MCP: get_audit_log</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2 class="card-title">Recent System & Agent Mutations</h2>
+              <button id="refreshAuditBtn" class="btn btn-secondary btn-sm">Refresh Audit Log</button>
+            </div>
+            <div class="card-body" style="overflow-x:auto;">
+              <table class="audit-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Action</th>
+                    <th>Actor</th>
+                    <th>Mode</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="auditTableBody">
+                  <tr><td colspan="6" class="empty-state">No audit logs recorded yet.</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </section>

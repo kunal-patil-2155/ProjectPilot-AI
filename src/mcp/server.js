@@ -9,15 +9,18 @@ import { HealthService } from '../services/healthService.js';
 import { PriorityService } from '../services/priorityService.js';
 import { MaintenanceService } from '../services/maintenanceService.js';
 import { generateRescuePlan } from '../services/rescueService.js';
+import { GitHubService } from '../services/githubService.js';
 
 /**
- * Creates and configures an McpServer instance with all 11 tools.
+ * Creates and configures an McpServer instance with all tools.
  * @param {import('../db/store.js').ProjectStore} store
+ * @param {Object} [options]
  */
-export function createProjectPilotMcpServer(store) {
+export function createProjectPilotMcpServer(store, options = {}) {
   const healthService = new HealthService(store);
   const priorityService = new PriorityService(store);
   const maintenanceService = new MaintenanceService(store);
+  const githubService = options.githubService || new GitHubService();
 
   const server = new McpServer({
     name: 'projectpilot-mcp',
@@ -462,6 +465,255 @@ export function createProjectPilotMcpServer(store) {
       }
     }
   );
+
+  // Extend with advanced project operations tools (Groups A-G) when extended mode is enabled
+  const enableExtended = options.enableExtended === true || process.env.PROJECTPILOT_EXTENDED_TOOLS === 'true';
+  if (enableExtended) {
+    // 13. inspect_github_repo
+    server.tool(
+      'inspect_github_repo',
+      'Inspect a GitHub repository URL for structure, dependencies, CI/CD, and security findings.',
+      {
+        repoUrl: z.string().min(1).describe('Valid GitHub repository URL (https://github.com/owner/repo)'),
+        branch: z.string().optional().describe('Optional branch to inspect')
+      },
+      async (args) => {
+        try {
+          const report = await githubService.inspectRepository(args.repoUrl, { branch: args.branch });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(report, null, 2)
+            }]
+          };
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Failed to inspect repository: ${err.message}` }]
+          };
+        }
+      }
+    );
+
+    // 14. delete_project
+    server.tool(
+      'delete_project',
+      'Permanently delete a project and its associated tasks with explicit confirmation safeguard.',
+      {
+        projectId: z.string().min(1).describe('Project identifier to delete'),
+        confirmDelete: z.boolean().describe('Must explicitly be true to confirm permanent deletion')
+      },
+      async (args) => {
+        try {
+          if (args.confirmDelete !== true) {
+            return {
+              isError: true,
+              content: [{ type: 'text', text: 'Destructive operation aborted: confirmDelete must be true.' }]
+            };
+          }
+          const result = await store.deleteProject(args.projectId);
+          await store.recordAudit({
+            action: 'delete_project',
+            actor: 'user',
+            mode: 'APPROVE',
+            targetType: 'project',
+            targetId: args.projectId,
+            details: { deletedTasks: result.deletedTaskCount, projectName: result.deletedProject.name }
+          });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                message: `Project "${result.deletedProject.name}" and ${result.deletedTaskCount} tasks deleted.`,
+                deletedProjectId: args.projectId,
+                deletedTaskCount: result.deletedTaskCount
+              }, null, 2)
+            }]
+          };
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Failed to delete project: ${err.message}` }]
+          };
+        }
+      }
+    );
+
+    // 15. reopen_task
+    server.tool(
+      'reopen_task',
+      'Reopen a previously completed or blocked task back to active status (todo or in_progress).',
+      {
+        taskId: z.string().describe('ID of the task to reopen'),
+        targetStatus: z.enum(['todo', 'in_progress']).optional().describe('Status to reopen to (default: todo)')
+      },
+      async (args) => {
+        try {
+          const updated = await store.reopenTask(args.taskId, args.targetStatus || 'todo');
+          await store.recordAudit({
+            action: 'reopen_task',
+            actor: 'assistant',
+            mode: 'AUTOPILOT',
+            targetType: 'task',
+            targetId: updated.id,
+            details: { reopenedTo: updated.status }
+          });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                message: `Task "${updated.title}" reopened to ${updated.status}.`,
+                task: updated
+              }, null, 2)
+            }]
+          };
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Failed to reopen task: ${err.message}` }]
+          };
+        }
+      }
+    );
+
+    // 16. delete_task
+    server.tool(
+      'delete_task',
+      'Delete a task with explicit confirmation.',
+      {
+        taskId: z.string().describe('ID of the task to delete'),
+        confirmDelete: z.boolean().describe('Must explicitly be true to confirm deletion')
+      },
+      async (args) => {
+        try {
+          if (args.confirmDelete !== true) {
+            return {
+              isError: true,
+              content: [{ type: 'text', text: 'Destructive operation aborted: confirmDelete must be true.' }]
+            };
+          }
+          const result = await store.deleteTask(args.taskId);
+          await store.recordAudit({
+            action: 'delete_task',
+            actor: 'user',
+            mode: 'APPROVE',
+            targetType: 'task',
+            targetId: args.taskId,
+            details: { taskTitle: result.deletedTask.title, projectId: result.deletedTask.projectId }
+          });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                message: `Task "${result.deletedTask.title}" was deleted.`,
+                deletedTaskId: args.taskId
+              }, null, 2)
+            }]
+          };
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Failed to delete task: ${err.message}` }]
+          };
+        }
+      }
+    );
+
+    // 17. manage_blocker
+    server.tool(
+      'manage_blocker',
+      'Record an explicit blocker on a task or resolve an existing blocker.',
+      {
+        taskId: z.string().describe('Target task identifier'),
+        action: z.enum(['block', 'resolve']).describe('Action: block or resolve'),
+        blockerReason: z.string().optional().describe('Explanation of blocker (required when action is block)'),
+        newStatus: z.enum(['in_progress', 'done']).optional().describe('Target status upon resolution (default: in_progress)')
+      },
+      async (args) => {
+        try {
+          if (args.action === 'block') {
+            if (!args.blockerReason || !args.blockerReason.trim()) {
+              return {
+                isError: true,
+                content: [{ type: 'text', text: 'blockerReason is required when action is block.' }]
+              };
+            }
+            const updated = await store.addBlocker(args.taskId, args.blockerReason);
+            await store.recordAudit({
+              action: 'block_task',
+              actor: 'assistant',
+              mode: 'AUTOPILOT',
+              targetType: 'task',
+              targetId: args.taskId,
+              details: { blockerReason: args.blockerReason }
+            });
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  message: `Task "${updated.title}" marked as blocked.`,
+                  task: updated
+                }, null, 2)
+              }]
+            };
+          } else {
+            const updated = await store.resolveBlocker(args.taskId, args.newStatus || 'in_progress');
+            await store.recordAudit({
+              action: 'resolve_blocker',
+              actor: 'assistant',
+              mode: 'AUTOPILOT',
+              targetType: 'task',
+              targetId: args.taskId,
+              details: { resolvedToStatus: updated.status }
+            });
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  message: `Blocker on "${updated.title}" resolved.`,
+                  task: updated
+                }, null, 2)
+              }]
+            };
+          }
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Failed to manage blocker: ${err.message}` }]
+          };
+        }
+      }
+    );
+
+    // 18. get_audit_log
+    server.tool(
+      'get_audit_log',
+      'Retrieve structured audit trail events for agent mutations, approvals, and compliance verification.',
+      {
+        action: z.string().optional().describe('Filter by action type'),
+        targetType: z.string().optional().describe('Filter by target type (project, task)'),
+        targetId: z.string().optional().describe('Filter by target ID'),
+        actor: z.string().optional().describe('Filter by actor (user, assistant)'),
+        limit: z.number().int().min(1).max(100).optional().describe('Number of records to retrieve (default: 50)')
+      },
+      async (args) => {
+        try {
+          const logs = store.listAuditLogs(args);
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ count: logs.length, auditLogs: logs }, null, 2)
+            }]
+          };
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Failed to get audit log: ${err.message}` }]
+          };
+        }
+      }
+    );
+  }
 
   return server;
 }

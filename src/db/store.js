@@ -21,7 +21,8 @@ export class ProjectStore {
     this.data = {
       meta: { version: '1.0.0', initializedAt: new Date().toISOString() },
       projects: [],
-      tasks: []
+      tasks: [],
+      auditLog: []
     };
     this._initialized = false;
   }
@@ -39,6 +40,9 @@ export class ProjectStore {
       const parsed = JSON.parse(content);
       if (Array.isArray(parsed.projects) && Array.isArray(parsed.tasks)) {
         this.data = parsed;
+        if (!Array.isArray(this.data.auditLog)) {
+          this.data.auditLog = [];
+        }
         this._initialized = true;
         return;
       }
@@ -50,6 +54,9 @@ export class ProjectStore {
 
     // File did not exist: seed with clean sample dataset
     this.data = getSampleData();
+    if (!Array.isArray(this.data.auditLog)) {
+      this.data.auditLog = [];
+    }
     await this._saveAtomic();
     this._initialized = true;
   }
@@ -154,6 +161,7 @@ export class ProjectStore {
       repoUrl: (input.repoUrl || '').trim(),
       status,
       priority,
+      version: 1,
       createdAt: now,
       updatedAt: now
     };
@@ -218,6 +226,7 @@ export class ProjectStore {
       updated.priority = priority;
     }
 
+    updated.version = (existing.version || 1) + 1;
     updated.updatedAt = new Date().toISOString();
     this.data.projects[index] = updated;
     await this._saveAtomic();
@@ -362,6 +371,7 @@ export class ProjectStore {
       blocker,
       isMaintenance: Boolean(input.isMaintenance),
       isBug: Boolean(input.isBug),
+      version: 1,
       createdAt: now,
       updatedAt: now,
       completedAt: isDone ? now : null
@@ -390,7 +400,12 @@ export class ProjectStore {
     }
 
     const now = new Date().toISOString();
-    const updated = { ...task, status: targetStatus, updatedAt: now };
+    const updated = {
+      ...task,
+      status: targetStatus,
+      updatedAt: now,
+      version: (task.version || 1) + 1
+    };
 
     if (targetStatus === 'blocked') {
       updated.blocker = blockerReason ? String(blockerReason).trim() : (task.blocker || 'Unspecified blocker');
@@ -487,6 +502,7 @@ export class ProjectStore {
       }
     }
 
+    updated.version = (task.version || 1) + 1;
     updated.updatedAt = new Date().toISOString();
     this.data.tasks[index] = updated;
     await this._saveAtomic();
@@ -529,6 +545,167 @@ export class ProjectStore {
         updatedAt: t.updatedAt
       };
     });
+  }
+
+  /**
+   * Reopen a completed or blocked task back to todo/in_progress.
+   */
+  async reopenTask(id, targetStatus = 'todo') {
+    if (!id) throw new Error('Task ID is required.');
+    const index = this.data.tasks.findIndex(t => t.id === id);
+    if (index === -1) {
+      throw new Error(`Task not found with ID "${id}".`);
+    }
+
+    const task = this.data.tasks[index];
+    const status = (targetStatus === 'in_progress') ? 'in_progress' : 'todo';
+    const now = new Date().toISOString();
+
+    const updated = {
+      ...task,
+      status,
+      completedAt: null,
+      blocker: null,
+      updatedAt: now,
+      version: (task.version || 1) + 1
+    };
+
+    this.data.tasks[index] = updated;
+    await this._saveAtomic();
+    return updated;
+  }
+
+  /**
+   * Add or update an explicit blocker on a task.
+   */
+  async addBlocker(taskId, blockerReason, priority = null) {
+    if (!taskId) throw new Error('Task ID is required.');
+    if (!blockerReason || !String(blockerReason).trim()) {
+      throw new Error('Blocker reason is required.');
+    }
+
+    const index = this.data.tasks.findIndex(t => t.id === taskId);
+    if (index === -1) {
+      throw new Error(`Task not found with ID "${taskId}".`);
+    }
+
+    const task = this.data.tasks[index];
+    const now = new Date().toISOString();
+    const updated = {
+      ...task,
+      status: 'blocked',
+      blocker: String(blockerReason).trim(),
+      completedAt: null,
+      updatedAt: now,
+      version: (task.version || 1) + 1
+    };
+
+    if (priority && VALID_PRIORITIES.includes(String(priority).toLowerCase())) {
+      updated.priority = String(priority).toLowerCase();
+    }
+
+    this.data.tasks[index] = updated;
+    await this._saveAtomic();
+    return updated;
+  }
+
+  /**
+   * Resolve a blocker and return task to in_progress or done.
+   */
+  async resolveBlocker(taskId, newStatus = 'in_progress') {
+    if (!taskId) throw new Error('Task ID is required.');
+    const index = this.data.tasks.findIndex(t => t.id === taskId);
+    if (index === -1) {
+      throw new Error(`Task not found with ID "${taskId}".`);
+    }
+
+    const task = this.data.tasks[index];
+    const targetStatus = VALID_TASK_STATUSES.includes(String(newStatus).toLowerCase())
+      ? String(newStatus).toLowerCase()
+      : 'in_progress';
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...task,
+      status: targetStatus,
+      blocker: null,
+      updatedAt: now,
+      completedAt: targetStatus === 'done' ? now : null,
+      version: (task.version || 1) + 1
+    };
+
+    this.data.tasks[index] = updated;
+    await this._saveAtomic();
+    return updated;
+  }
+
+  // ==========================================
+  // AUDIT LOGGING & COMPLIANCE OPERATIONS
+  // ==========================================
+
+  /**
+   * Record a structured audit trail event.
+   */
+  async recordAudit(entry) {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error('Audit entry must be an object.');
+    }
+
+    if (!Array.isArray(this.data.auditLog)) {
+      this.data.auditLog = [];
+    }
+
+    const now = new Date().toISOString();
+    const auditRecord = {
+      id: `audit-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      timestamp: now,
+      action: entry.action || 'system_event',
+      actor: entry.actor || 'assistant',
+      mode: entry.mode || 'APPROVE',
+      targetType: entry.targetType || 'unknown',
+      targetId: entry.targetId || null,
+      details: entry.details || {},
+      status: entry.status || 'success'
+    };
+
+    this.data.auditLog.push(auditRecord);
+
+    // Bounded log size (max 1000 items)
+    if (this.data.auditLog.length > 1000) {
+      this.data.auditLog = this.data.auditLog.slice(-1000);
+    }
+
+    await this._saveAtomic();
+    return auditRecord;
+  }
+
+  /**
+   * Query structured audit trail with optional filters.
+   */
+  listAuditLogs(filters = {}) {
+    let logs = Array.isArray(this.data.auditLog) ? [...this.data.auditLog] : [];
+
+    if (filters.action) {
+      logs = logs.filter(l => l.action.toLowerCase() === filters.action.toLowerCase());
+    }
+    if (filters.targetType) {
+      logs = logs.filter(l => l.targetType.toLowerCase() === filters.targetType.toLowerCase());
+    }
+    if (filters.targetId) {
+      logs = logs.filter(l => l.targetId === filters.targetId);
+    }
+    if (filters.actor) {
+      logs = logs.filter(l => l.actor.toLowerCase() === filters.actor.toLowerCase());
+    }
+    if (filters.mode) {
+      logs = logs.filter(l => l.mode.toUpperCase() === filters.mode.toUpperCase());
+    }
+
+    // Sort descending by timestamp
+    logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    const limit = filters.limit ? Math.min(Math.max(1, parseInt(filters.limit, 10)), 100) : 50;
+    return logs.slice(0, limit);
   }
 
   /**

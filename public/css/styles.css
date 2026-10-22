@@ -2295,3 +2295,167 @@ dialog.dialog-wide {
     display: none;
   }
 }
+
+/* ==========================================================================
+   ADVANCED OPERATIONS & PLATFORM ENHANCEMENTS (PHASES 3, 4, 5, 8)
+   ========================================================================== */
+
+/* Expandable Technical Details Disclosure */
+.technical-details-disclosure {
+  margin-top: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.technical-details-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.technical-details-summary:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.technical-details-content {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-canvas);
+}
+
+/* Execution Mode Selector */
+.execution-mode-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  padding: 3px 6px;
+  border-radius: var(--radius-full);
+}
+
+.mode-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 4px;
+  letter-spacing: 0.5px;
+}
+
+.mode-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: var(--font-mono);
+}
+
+.mode-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mode-btn.active[data-mode="ASK"] {
+  background: var(--status-cyan-subtle);
+  color: var(--status-cyan);
+  border: 1px solid var(--status-cyan-border);
+}
+
+.mode-btn.active[data-mode="APPROVE"] {
+  background: var(--status-amber-subtle);
+  color: var(--status-amber);
+  border: 1px solid var(--status-amber-border);
+}
+
+.mode-btn.active[data-mode="AUTOPILOT"] {
+  background: var(--status-emerald-subtle);
+  color: var(--status-emerald);
+  border: 1px solid var(--status-emerald-border);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+/* GitHub Audit & Findings View */
+.github-repo-picker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.findings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.finding-card {
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-elevated);
+  transition: border-color 0.15s ease;
+}
+
+.finding-card:hover {
+  border-color: var(--border-default);
+}
+
+.finding-card.severity-critical {
+  border-left: 4px solid var(--status-rose);
+}
+
+.finding-card.severity-high {
+  border-left: 4px solid var(--status-amber);
+}
+
+.finding-card.severity-medium {
+  border-left: 4px solid var(--status-cyan);
+}
+
+.finding-card.severity-low {
+  border-left: 4px solid var(--text-muted);
+}
+
+/* Audit Log Table */
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.audit-table th {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-default);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.audit-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.audit-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
