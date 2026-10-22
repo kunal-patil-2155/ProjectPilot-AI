@@ -151,7 +151,8 @@ describe('Model Context Protocol (MCP) Streamable HTTP Server', () => {
       'list_blockers',
       'get_project_health',
       'get_priority_recommendations',
-      'list_maintenance_tasks'
+      'list_maintenance_tasks',
+      'generate_rescue_plan'
     ];
 
     const discoveredNames = body.result.tools.map(t => t.name);
@@ -299,6 +300,21 @@ describe('Model Context Protocol (MCP) Streamable HTTP Server', () => {
     const parsed = JSON.parse(body.result.content[0].text);
     assert.ok(parsed.totalMaintenanceTasks >= 2);
     assert.ok(parsed.categories.overdue.length >= 1);
+  });
+
+  test('Tool 12: generate_rescue_plan', async () => {
+    const { status, body } = await callMcp('tools/call', {
+      name: 'generate_rescue_plan',
+      arguments: { projectId: 'proj-checkout' }
+    });
+    assert.equal(status, 200);
+    assert.ok(!body.result.isError);
+    const plan = JSON.parse(body.result.content[0].text);
+    assert.equal(plan.projectId, 'proj-checkout');
+    assert.equal(plan.baselineHealth.healthStatus, 'At Risk');
+    assert.ok(Array.isArray(plan.actions));
+    assert.ok(Array.isArray(plan.notRemediable));
+    assert.ok(Array.isArray(plan.limitations));
   });
 
   test('Error handling: tool error on invalid project query', async () => {

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { HealthService } from '../services/healthService.js';
 import { PriorityService } from '../services/priorityService.js';
 import { MaintenanceService } from '../services/maintenanceService.js';
+import { generateRescuePlan } from '../services/rescueService.js';
 
 /**
  * Creates and configures an McpServer instance with all 11 tools.
@@ -246,7 +247,7 @@ export function createProjectPilotMcpServer(store) {
     {
       taskId: z.string().describe('ID of the task to update'),
       status: z.enum(['todo', 'in_progress', 'blocked', 'done']).describe('New status'),
-      blockerReason: z.string().optional().describe('Explanation of blocker if status is blocked')
+      blockerReason: z.string().nullable().optional().describe('Explanation of blocker if status is blocked')
     },
     async (args) => {
       try {
@@ -369,6 +370,94 @@ export function createProjectPilotMcpServer(store) {
         return {
           isError: true,
           content: [{ type: 'text', text: `Failed to list maintenance tasks: ${err.message}` }]
+        };
+      }
+    }
+  );
+
+  // 12. generate_rescue_plan
+  server.tool(
+    'generate_rescue_plan',
+    'Synthesize a deterministic, evidence-based project rescue plan with supported remediation actions and health projections.',
+    {
+      projectId: z.string().optional().describe('Unique identifier or name of the project to generate a rescue plan for'),
+      projectName: z.string().optional().describe('Project name (optional alternative to projectId)')
+    },
+    async (args) => {
+      try {
+        const identifier = (args.projectId || args.projectName || '').trim();
+        if (!identifier) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: 'Project identifier is required (provide projectId or projectName).' }]
+          };
+        }
+
+        let project = null;
+
+        // 1. Direct ID lookup
+        const byId = store.getProject(identifier);
+        if (byId) {
+          project = byId;
+        } else {
+          // 2. Name-based lookup across all projects
+          const allProjects = store.listProjects();
+          const searchLower = identifier.toLowerCase();
+
+          // A. Exact case-insensitive name match
+          const exactMatches = allProjects.filter(p => p.name && p.name.trim().toLowerCase() === searchLower);
+
+          if (exactMatches.length === 1) {
+            project = store.getProject(exactMatches[0].id);
+          } else if (exactMatches.length > 1) {
+            return {
+              isError: true,
+              content: [{
+                type: 'text',
+                text: `Ambiguous project name "${identifier}": matches ${exactMatches.length} projects (${exactMatches.map(p => `${p.name} [${p.id}]`).join(', ')}). Please specify the unique projectId.`
+              }]
+            };
+          } else {
+            // B. Substring / partial match if no exact match
+            const partialMatches = allProjects.filter(p => p.name && p.name.toLowerCase().includes(searchLower));
+            if (partialMatches.length === 1) {
+              project = store.getProject(partialMatches[0].id);
+            } else if (partialMatches.length > 1) {
+              return {
+                isError: true,
+                content: [{
+                  type: 'text',
+                  text: `Ambiguous project name "${identifier}": matches ${partialMatches.length} projects (${partialMatches.map(p => `${p.name} [${p.id}]`).join(', ')}). Please specify the unique projectId.`
+                }]
+              };
+            }
+          }
+        }
+
+        if (!project) {
+          return {
+            isError: true,
+            content: [{
+              type: 'text',
+              text: `Project "${identifier}" was not found.`
+            }]
+          };
+        }
+
+        const tasks = store.listTasks({ projectId: project.id });
+        const health = healthService.getHealth(project.id);
+        const plan = generateRescuePlan(project, tasks, health);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(plan, null, 2)
+          }]
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Failed to generate rescue plan: ${err.message}` }]
         };
       }
     }

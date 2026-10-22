@@ -10,6 +10,38 @@ export const GENERIC_PROJECT_WORDS = new Set([
   'the', 'a', 'an', 'my', 'our', 'this', 'and', 'or', 'for', 'of', 'in', 'on', 'to'
 ]);
 
+import { RescueExecutionEngine, ACTION_OUTCOMES, ALLOWED_EXECUTION_TOOLS, ALLOWED_ACTION_TYPES } from './rescueExecutionEngine.js';
+export { RescueExecutionEngine, ACTION_OUTCOMES, ALLOWED_EXECUTION_TOOLS, ALLOWED_ACTION_TYPES };
+
+/**
+ * Explicit state model for the autonomous rescue workflow (Phase 4).
+ */
+export const RESCUE_STATES = {
+  IDLE: 'IDLE',
+  GENERATING_PLAN: 'GENERATING_PLAN',
+  AWAITING_APPROVAL: 'AWAITING_APPROVAL',
+  EXECUTING: 'EXECUTING',
+  VERIFYING: 'VERIFYING',
+  COMPLETED: 'COMPLETED',
+  PARTIALLY_COMPLETED: 'PARTIALLY_COMPLETED',
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED',
+  STALE_PLAN: 'STALE_PLAN'
+};
+
+/**
+ * Escapes untrusted text to prevent HTML injection in rendered cards.
+ */
+export function escapeHtml(str) {
+  if (typeof str !== 'string') return String(str ?? '');
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 /**
  * Normalizes text for intent routing by trimming and stripping polite prefixes.
  */
@@ -33,6 +65,63 @@ export function normalizeForComparison(str) {
     .replace(/[\u2010-\u2015\u2212\-_/\\:;,."'`()[\]{}]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Checks whether an incoming text intends a project rescue workflow.
+ */
+export function isRescueIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  return (
+    norm.startsWith('rescue') ||
+    norm.startsWith('help rescue') ||
+    norm.startsWith('prepare a rescue') ||
+    norm.startsWith('prepare rescue') ||
+    norm.startsWith('prepare a recovery') ||
+    norm.startsWith('prepare recovery') ||
+    norm.startsWith('create a rescue') ||
+    norm.startsWith('create rescue') ||
+    norm.startsWith('create a recovery') ||
+    norm.startsWith('create recovery') ||
+    norm.startsWith('plan a rescue') ||
+    norm.startsWith('plan rescue') ||
+    norm.startsWith('plan recovery') ||
+    norm.includes('rescue plan') ||
+    norm.includes('recovery plan') ||
+    norm.includes('rescue project') ||
+    norm.includes('rescue the project') ||
+    (norm.includes('prepare') && norm.includes('rescue')) ||
+    (norm.includes('investigate') && norm.includes('recovery plan')) ||
+    (norm.includes('investigate') && norm.includes('rescue plan'))
+  );
+}
+
+/**
+ * Robustly extracts the target project name from a conversational rescue command.
+ */
+export function extractRescueQuery(rawText) {
+  if (!rawText || typeof rawText !== 'string') return '';
+  let text = rawText.trim().replace(/[?.!,;:]+$/, '').trim();
+  text = text.replace(/^(?:can\s+you\s+|could\s+you\s+|please\s+|kindly\s+)/i, '').trim();
+
+  const patterns = [
+    /^(?:investigate(?:\s+the)?\s+risks\s+and\s+)?prepare\s+(?:a\s+)?(?:rescue|recovery)\s+plan\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^create\s+(?:a\s+)?(?:rescue|recovery)\s+plan\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^plan\s+(?:a\s+)?rescue\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^(?:rescue|help\s+rescue)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^(?:rescue|recovery)\s+plan\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^rescue\s+(.+)$/i
+  ];
+
+  for (const pat of patterns) {
+    const match = text.match(pat);
+    if (match && match[1] && match[1].trim()) {
+      return match[1].trim();
+    }
+  }
+
+  return extractProjectQuery(text);
 }
 
 /**
@@ -279,6 +368,11 @@ export class AssistantOrchestrator {
   constructor(mcpClient) {
     this.mcpClient = mcpClient;
     this.pendingResolution = null; // Used when clarifying ambiguous tasks/projects
+    this.rescueState = RESCUE_STATES.IDLE;
+    this.pendingRescuePlan = null;
+    this.selectedActionIds = new Set();
+    this.executionEngine = new RescueExecutionEngine(mcpClient);
+    this.lastExecutionReport = null;
   }
 
   /**
@@ -303,11 +397,70 @@ export class AssistantOrchestrator {
 
     const lower = text.toLowerCase();
 
+    // Check if an active rescue plan is awaiting approval
+    if (this.rescueState === RESCUE_STATES.AWAITING_APPROVAL) {
+      if (
+        lower === 'cancel' ||
+        lower === 'cancel plan' ||
+        lower === 'abort' ||
+        lower === 'nevermind' ||
+        lower === 'dismiss' ||
+        lower === 'stop'
+      ) {
+        const pName = this.pendingRescuePlan?.projectName || 'current project';
+        this.cancelRescuePlan();
+        return {
+          workflow: 'rescue_plan_cancelled',
+          toolCalls: [],
+          explanation: `The rescue plan for **${pName}** has been cancelled. No persistent actions were executed.`
+        };
+      }
+
+      if (lower === 'yes' || lower === 'approve' || lower === 'confirm' || lower === 'proceed') {
+        return {
+          workflow: 'rescue_plan_guidance',
+          toolCalls: [],
+          explanation: `Action approval requires explicit selection using the interactive approval card controls. Please click the **Approve Selected** button on the card above.\n\n*Note: In Phase 3, approval records your selection; sequential execution will be enabled in Phase 4.*`
+        };
+      }
+    }
+
+    // Check if rescue execution is actively running
+    if (this.rescueState === RESCUE_STATES.EXECUTING) {
+      if (
+        lower === 'cancel' ||
+        lower === 'cancel plan' ||
+        lower === 'abort' ||
+        lower === 'nevermind' ||
+        lower === 'dismiss' ||
+        lower === 'stop'
+      ) {
+        this.cancelRescuePlan();
+        return {
+          workflow: 'rescue_execution_cancelling',
+          toolCalls: [],
+          explanation: 'Cancellation requested. The active execution loop will stop safely after the currently running step.'
+        };
+      }
+      return {
+        workflow: 'rescue_executing_busy',
+        toolCalls: [],
+        explanation: `Rescue actions are currently executing sequentially for project **${this.pendingRescuePlan?.projectName || 'current project'}**. Please wait for completion or type "cancel" to stop remaining actions.`
+      };
+    }
+
     // Check if we are handling an active clarification reply
     if (this.pendingResolution) {
       const resolution = this.pendingResolution;
       this.pendingResolution = null;
       return this._handleClarificationSelection(text, resolution);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow 0: Autonomous Project Rescue (evaluated before investigation)
+    // -------------------------------------------------------------
+    if (isRescueIntent(text)) {
+      return this._workflowRescueProject(text);
     }
 
     // -------------------------------------------------------------
@@ -802,7 +955,733 @@ You can ask me to:
     };
   }
 
+  // =============================================================
+  // RESCUE PLAN WORKFLOW & STATE MANAGEMENT (Phase 3)
+  // =============================================================
+
+  getRescueState() {
+    return {
+      state: this.rescueState,
+      plan: this.pendingRescuePlan,
+      selectedActionIds: Array.from(this.selectedActionIds)
+    };
+  }
+
+  cancelRescuePlan() {
+    if (this.executionEngine && this.executionEngine.isExecuting) {
+      this.executionEngine.requestCancellation();
+      this.rescueState = RESCUE_STATES.CANCELLED;
+      return {
+        cancelled: true,
+        message: 'Cancellation requested. Active execution will safely stop after the current step.'
+      };
+    }
+    this.rescueState = RESCUE_STATES.CANCELLED;
+    this.pendingRescuePlan = null;
+    this.selectedActionIds.clear();
+    return {
+      cancelled: true,
+      message: 'Rescue plan has been cancelled.'
+    };
+  }
+
+  toggleActionSelection(actionId, isSelected = true) {
+    if (this.rescueState !== RESCUE_STATES.AWAITING_APPROVAL || !this.pendingRescuePlan) {
+      throw new Error('Cannot toggle action selection: No rescue plan is currently awaiting approval.');
+    }
+    const validAction = (this.pendingRescuePlan.actions || []).find(a => a.id === actionId);
+    if (!validAction) {
+      throw new Error(`Invalid action ID "${actionId}": Not part of the currently pending rescue plan.`);
+    }
+    if (isSelected) {
+      this.selectedActionIds.add(actionId);
+    } else {
+      this.selectedActionIds.delete(actionId);
+    }
+    return Array.from(this.selectedActionIds);
+  }
+
+  selectAllActions(selectAll = true) {
+    if (this.rescueState !== RESCUE_STATES.AWAITING_APPROVAL || !this.pendingRescuePlan) {
+      throw new Error('Cannot select actions: No rescue plan is currently awaiting approval.');
+    }
+    if (selectAll) {
+      this.selectedActionIds = new Set((this.pendingRescuePlan.actions || []).map(a => a.id));
+    } else {
+      this.selectedActionIds.clear();
+    }
+    return Array.from(this.selectedActionIds);
+  }
+
+  approveSelectedActions() {
+    if (this.rescueState !== RESCUE_STATES.AWAITING_APPROVAL || !this.pendingRescuePlan) {
+      return {
+        approved: false,
+        message: 'No rescue plan is currently awaiting approval.'
+      };
+    }
+    if (this.selectedActionIds.size === 0) {
+      return {
+        approved: false,
+        message: 'No actions selected. Please select at least one action to approve, or click Cancel Plan.'
+      };
+    }
+    const planActionIds = new Set((this.pendingRescuePlan.actions || []).map(a => a.id));
+    for (const id of this.selectedActionIds) {
+      if (!planActionIds.has(id)) {
+        throw new Error(`Unauthorized or invalid action ID "${id}".`);
+      }
+    }
+    return {
+      approved: true,
+      actionCount: this.selectedActionIds.size,
+      actionIds: Array.from(this.selectedActionIds),
+      message: 'Actions recorded as approved for Phase 4 execution. No write tools called.'
+    };
+  }
+
+  /**
+   * Executes the explicitly approved actions from the pending rescue plan sequentially.
+   *
+   * @param {Function} [onProgress] - Callback: (actionId, outcome, record) => void
+   * @returns {Promise<{ workflow: string, rescueState: string, report: Object, explanation: string, cardHtml: string }>}
+   */
+  async executeRescuePlan(onProgress = null) {
+    if (this.rescueState !== RESCUE_STATES.AWAITING_APPROVAL || !this.pendingRescuePlan) {
+      throw new Error('Cannot execute rescue plan: No rescue plan is currently awaiting approval.');
+    }
+    if (this.selectedActionIds.size === 0) {
+      throw new Error('Cannot execute rescue plan: No actions selected for execution.');
+    }
+
+    const plan = this.pendingRescuePlan;
+    const selectedIds = new Set(this.selectedActionIds);
+
+    // Validate that all selected IDs belong to the current pending plan
+    const planActionIds = new Set((plan.actions || []).map(a => a.id));
+    for (const id of selectedIds) {
+      if (!planActionIds.has(id)) {
+        throw new Error(`Unauthorized or invalid action ID "${id}".`);
+      }
+    }
+
+    this.rescueState = RESCUE_STATES.EXECUTING;
+
+    let report;
+    try {
+      report = await this.executionEngine.executePlan(plan, selectedIds, onProgress);
+    } catch (err) {
+      this.rescueState = RESCUE_STATES.FAILED;
+      throw err;
+    }
+
+    this.rescueState = RESCUE_STATES.VERIFYING;
+
+    // Transition rescueState to reflect actual execution outcome
+    if (report.status === 'COMPLETED') {
+      this.rescueState = RESCUE_STATES.COMPLETED;
+    } else if (report.status === 'PARTIALLY_COMPLETED') {
+      this.rescueState = RESCUE_STATES.PARTIALLY_COMPLETED;
+    } else if (report.status === 'STALE_PLAN') {
+      this.rescueState = RESCUE_STATES.STALE_PLAN;
+    } else if (report.status === 'CANCELLED') {
+      this.rescueState = RESCUE_STATES.CANCELLED;
+    } else {
+      this.rescueState = RESCUE_STATES.FAILED;
+    }
+
+    this.lastExecutionReport = report;
+    // Clear pending plan so it cannot be re-executed
+    this.pendingRescuePlan = null;
+    this.selectedActionIds.clear();
+
+    const explanation = this._buildExecutionMarkdownSummary(report);
+    const cardHtml = this._buildExecutionVerificationCard(report);
+
+    return {
+      workflow: 'rescue_execution',
+      rescueState: this.rescueState,
+      report,
+      explanation,
+      cardHtml
+    };
+  }
+
+  async _workflowRescueProject(rawText) {
+    const toolCalls = [];
+
+    // Guard: Prevent overwriting an active pending rescue plan awaiting approval
+    if (this.rescueState === RESCUE_STATES.AWAITING_APPROVAL && this.pendingRescuePlan) {
+      return {
+        workflow: 'rescue_plan_blocked',
+        toolCalls: [],
+        explanation: `⚠️ A rescue plan for project **${this.pendingRescuePlan.projectName}** (\`${this.pendingRescuePlan.projectId}\`) is currently awaiting your approval.\n\nPlease approve or cancel the pending plan before starting a new rescue workflow.`
+      };
+    }
+
+    this.rescueState = RESCUE_STATES.GENERATING_PLAN;
+
+    // Step 1: Retrieve live projects to resolve target project
+    const projectsRes = await this.mcpClient.callTool('list_projects', {});
+    toolCalls.push({
+      name: 'list_projects',
+      args: {},
+      result: projectsRes.data
+    });
+
+    const projects = projectsRes.data?.projects || [];
+    const extractedQuery = extractRescueQuery(rawText);
+    const resolution = resolveProject(extractedQuery, projects);
+
+    if (resolution.status === 'empty') {
+      this.rescueState = RESCUE_STATES.IDLE;
+      const projectListStr = projects.length > 0
+        ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
+        : 'No projects currently registered.';
+      return {
+        workflow: 'rescue_plan',
+        toolCalls,
+        explanation: `Please specify which project you want to rescue.\n\nAvailable projects:\n${projectListStr}`
+      };
+    }
+
+    if (resolution.status === 'not_found') {
+      this.rescueState = RESCUE_STATES.IDLE;
+      const projectListStr = projects.length > 0
+        ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
+        : 'No projects currently registered.';
+      return {
+        workflow: 'rescue_plan',
+        toolCalls,
+        explanation: `I could not find any project matching "${resolution.query || extractedQuery}".\n\nAvailable projects:\n${projectListStr}\n\nPlease specify a registered project name to prepare a rescue plan.`
+      };
+    }
+
+    if (resolution.status === 'ambiguous') {
+      this.rescueState = RESCUE_STATES.IDLE;
+      this.pendingResolution = {
+        action: 'rescue_project',
+        candidates: resolution.candidates
+      };
+      return {
+        workflow: 'rescue_plan_ambiguous',
+        toolCalls,
+        explanation: `Multiple projects match "${extractedQuery}". Which project would you like to rescue?`,
+        clarificationOptions: resolution.candidates.map(p => ({
+          label: `${p.name} (${p.category})`,
+          action: `rescue project ${p.id}`
+        }))
+      };
+    }
+
+    const targetProject = resolution.project;
+
+    // Step 2: Call real MCP generate_rescue_plan tool using target project's ID
+    let planRes;
+    try {
+      planRes = await this.mcpClient.callTool('generate_rescue_plan', { projectId: targetProject.id });
+      toolCalls.push({
+        name: 'generate_rescue_plan',
+        args: { projectId: targetProject.id },
+        result: planRes.data
+      });
+    } catch (err) {
+      this.rescueState = RESCUE_STATES.IDLE;
+      toolCalls.push({
+        name: 'generate_rescue_plan',
+        args: { projectId: targetProject.id },
+        error: err.message
+      });
+      return {
+        workflow: 'rescue_plan',
+        toolCalls,
+        explanation: `⚠️ Failed to generate rescue plan for "${targetProject.name}" (${targetProject.id}): ${err.message}`
+      };
+    }
+
+    if (planRes.isError) {
+      this.rescueState = RESCUE_STATES.IDLE;
+      return {
+        workflow: 'rescue_plan',
+        toolCalls,
+        explanation: `⚠️ Error from MCP server: ${planRes.content?.[0]?.text || 'Failed to generate rescue plan'}`
+      };
+    }
+
+    const plan = planRes.data;
+    if (!plan || !plan.planId) {
+      this.rescueState = RESCUE_STATES.IDLE;
+      return {
+        workflow: 'rescue_plan',
+        toolCalls,
+        explanation: `⚠️ Unexpected response from generate_rescue_plan MCP tool.`
+      };
+    }
+
+    // Set pending-plan state
+    this.pendingRescuePlan = plan;
+    this.selectedActionIds = new Set((plan.actions || []).map(a => a.id));
+    this.rescueState = RESCUE_STATES.AWAITING_APPROVAL;
+
+    const explanation = this._buildRescueMarkdownSummary(plan);
+    const cardHtml = this._buildRescueApprovalCard(plan, this.selectedActionIds);
+
+    return {
+      workflow: 'rescue_plan',
+      rescueState: this.rescueState,
+      plan,
+      toolCalls,
+      explanation,
+      cardHtml,
+      isApprovalCard: true
+    };
+  }
+
+  _buildRescueMarkdownSummary(plan) {
+    const actCount = plan.actions?.length || 0;
+    const manualCount = plan.notRemediable?.length || 0;
+    const pName = plan.projectName || plan.projectId;
+    let md = `### 🛡️ Rescue Plan Prepared: ${pName} (\`${plan.projectId}\`)\n\n`;
+    md += `• **Current Health:** **${plan.baselineHealth?.healthStatus || 'Unknown'}**\n`;
+    md += `• **Proposed Actions:** ${actCount} executable action(s) staged for review.\n`;
+    if (manualCount > 0) {
+      md += `• **Manual Interventions:** ${manualCount} non-executable recommendation(s).\n`;
+    }
+    if (plan.projectedHealth) {
+      md += `• **Projected Health Transition:** \`${plan.projectedHealth.statusChange}\`\n`;
+    }
+    md += `\n*Please review the interactive action preview card below and choose which actions to approve or cancel.*`;
+    return md;
+  }
+
+  _buildRescueApprovalCard(plan, selectedActionIds) {
+    const pName = escapeHtml(plan.projectName || plan.projectId);
+    const pId = escapeHtml(plan.projectId);
+    const baselineStatus = escapeHtml(plan.baselineHealth?.healthStatus || 'Unknown');
+    const baselineReasons = escapeHtml(plan.baselineHealth?.statusReasons?.join('; ') || 'None provided');
+    const completeness = plan.dataCompleteness || { percentage: 0, rating: 'Minimal', summary: 'N/A' };
+    const completenessSummary = escapeHtml(completeness.summary || `${completeness.percentage}% (${completeness.rating})`);
+
+    const healthBadgeClass = baselineStatus === 'Healthy'
+      ? 'badge-success'
+      : (baselineStatus === 'At Risk' ? 'badge-danger' : 'badge-warning');
+
+    // Executable Actions
+    let actionsHtml = '';
+    const executableCount = plan.actions?.length || 0;
+
+    if (executableCount === 0) {
+      actionsHtml = `
+        <div class="rescue-empty-notice">
+          ℹ️ <strong>No automated write actions are proposed for this project.</strong>
+          <p style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">
+            This project has no registered tasks that can be safely transitioned via active MCP tools. Please review the manual recommendations below.
+          </p>
+        </div>
+      `;
+    } else {
+      const allSelected = selectedActionIds.size === executableCount;
+      actionsHtml = `
+        <div class="rescue-select-all-row">
+          <label class="rescue-checkbox-label">
+            <input type="checkbox" class="rescue-select-all" ${allSelected ? 'checked' : ''} />
+            <span><strong>Select All (${executableCount} proposed action${executableCount === 1 ? '' : 's'})</strong></span>
+          </label>
+        </div>
+        <div class="rescue-actions-list">
+          ${plan.actions.map(act => {
+            const isChecked = selectedActionIds.has(act.id);
+            const riskClass = act.riskLevel === 'critical' || act.riskLevel === 'high'
+              ? 'badge-risk-critical'
+              : (act.riskLevel === 'medium' ? 'badge-risk-medium' : 'badge-risk-low');
+            const currentStatus = escapeHtml(act.preconditions?.currentStatus || 'unknown');
+            const targetStatus = escapeHtml(act.params?.status || 'active');
+
+            return `
+              <div class="rescue-action-item ${isChecked ? 'selected' : ''}" data-action-id="${escapeHtml(act.id)}">
+                <div class="rescue-action-header">
+                  <label class="rescue-checkbox-label">
+                    <input type="checkbox" class="rescue-action-checkbox" data-action-id="${escapeHtml(act.id)}" ${isChecked ? 'checked' : ''} />
+                    <strong>${escapeHtml(act.description)}</strong>
+                  </label>
+                  <div class="rescue-action-badges">
+                    <span class="rescue-badge ${riskClass}">Risk: ${escapeHtml(act.riskLevel.toUpperCase())}</span>
+                    <span class="rescue-badge badge-executable">Tool: ${escapeHtml(act.tool)}</span>
+                  </div>
+                </div>
+                <div class="rescue-action-body">
+                  <div class="rescue-action-meta">
+                    <span><strong>Target:</strong> <code>${escapeHtml(act.targetId)}</code> (${escapeHtml(act.title || act.targetId)})</span>
+                    <span><strong>State:</strong> <code>${currentStatus}</code> ➔ <code>${targetStatus}</code></span>
+                  </div>
+                  <div class="rescue-action-detail">
+                    <div><strong>Evidence:</strong> ${escapeHtml(act.evidence)}</div>
+                    <div><strong>Rationale:</strong> ${escapeHtml(act.rationale)}</div>
+                    <div><strong>Expected Impact:</strong> ${escapeHtml(act.expectedImpact)}</div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    // Manual / Unsupported Recommendations
+    let manualHtml = '';
+    const manualCount = plan.notRemediable?.length || 0;
+    if (manualCount > 0) {
+      manualHtml = `
+        <div class="rescue-section rescue-manual-section">
+          <div class="rescue-section-title">
+            <span>⚠️ Manual Interventions &amp; Unsupported Items (${manualCount})</span>
+            <span class="rescue-badge badge-manual">Non-Executable via MCP</span>
+          </div>
+          <div class="rescue-manual-list">
+            ${plan.notRemediable.map(nr => `
+              <div class="rescue-manual-item">
+                <div class="rescue-manual-header">
+                  <strong>${escapeHtml(nr.title || nr.type)}</strong>
+                  ${nr.targetId ? `<code>${escapeHtml(nr.targetId)}</code>` : ''}
+                </div>
+                <div class="rescue-manual-reason"><strong>Reason:</strong> ${escapeHtml(nr.reason)}</div>
+                <div class="rescue-manual-rec"><strong>Recommendation:</strong> ${escapeHtml(nr.recommendation)}</div>
+                ${nr.checklist ? `
+                  <ul class="rescue-manual-checklist">
+                    ${nr.checklist.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+                  </ul>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // Projected Health Section
+    let projectionHtml = '';
+    if (plan.projectedHealth) {
+      const proj = plan.projectedHealth;
+      const projBadgeClass = proj.status === 'Healthy'
+        ? 'badge-success'
+        : (proj.status === 'At Risk' ? 'badge-danger' : 'badge-warning');
+      projectionHtml = `
+        <div class="rescue-section rescue-projection-section">
+          <div class="rescue-section-title">
+            <span>📈 Estimated Health Projection</span>
+            <span class="rescue-badge ${projBadgeClass}">Projected: ${escapeHtml(proj.status)}</span>
+          </div>
+          <div class="rescue-projection-body">
+            <div><strong>Status Transition:</strong> <code>${escapeHtml(proj.statusChange)}</code></div>
+            <div><strong>Estimated Reasons:</strong> ${escapeHtml(proj.statusReasons?.join('; ') || 'None')}</div>
+            <div class="rescue-projection-disclaimer">
+              ℹ️ <em>${escapeHtml(proj.disclaimer)}</em>
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      projectionHtml = `
+        <div class="rescue-section rescue-projection-section">
+          <div class="rescue-section-title">
+            <span>📈 Health Projection</span>
+            <span class="rescue-badge badge-manual">Not Available</span>
+          </div>
+          <div class="rescue-projection-disclaimer">
+            <em>${escapeHtml(plan.projectionExplanation || 'Truthful health projection cannot be computed (insufficient task data).')}</em>
+          </div>
+        </div>
+      `;
+    }
+
+    // Controls
+    let controlsHtml = '';
+    const selectedCount = selectedActionIds.size;
+    if (executableCount > 0) {
+      controlsHtml = `
+        <div class="rescue-controls">
+          <button class="btn btn-primary btn-sm rescue-approve-btn" data-plan-id="${escapeHtml(plan.planId)}">
+            Approve Selected (${selectedCount})
+          </button>
+          <button class="btn btn-secondary btn-sm rescue-cancel-btn" data-plan-id="${escapeHtml(plan.planId)}">
+            Cancel Plan
+          </button>
+          <span class="rescue-phase-notice"><em>*Phase 3: Approval records selection; execution engine connects in Phase 4. Zero write tools are called.</em></span>
+        </div>
+      `;
+    } else {
+      controlsHtml = `
+        <div class="rescue-controls">
+          <button class="btn btn-secondary btn-sm rescue-cancel-btn" data-plan-id="${escapeHtml(plan.planId)}">
+            Dismiss / Cancel Plan
+          </button>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="rescue-plan-card" data-plan-id="${escapeHtml(plan.planId)}">
+        <div class="rescue-card-header">
+          <div class="rescue-card-title">
+            <span class="rescue-icon">🛡️</span>
+            <strong>Rescue Plan: ${pName}</strong>
+            <code>${pId}</code>
+          </div>
+          <span class="rescue-badge ${healthBadgeClass}">Observed: ${baselineStatus}</span>
+        </div>
+
+        <div class="rescue-meta-box">
+          <div class="rescue-meta-item"><strong>Current Health Reasons:</strong> ${baselineReasons}</div>
+          <div class="rescue-meta-item"><strong>Data Completeness:</strong> ${completenessSummary}</div>
+          <div class="rescue-meta-item">
+            <strong>Evidence Limitations:</strong>
+            <ul class="rescue-limitations-list">
+              ${plan.limitations.map(l => `<li>${escapeHtml(l)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+
+        <div class="rescue-section">
+          <div class="rescue-section-title">
+            <span>Proposed Remediation Actions (${executableCount})</span>
+          </div>
+          ${actionsHtml}
+        </div>
+
+        ${manualHtml}
+
+        ${projectionHtml}
+
+        ${controlsHtml}
+      </div>
+    `;
+  }
+
+  _buildExecutionMarkdownSummary(report) {
+    const pName = report.projectName || report.projectId;
+    const pId = report.projectId;
+    const s = report.summary || { total: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: 0 };
+    let md = `### 🛡️ Rescue Plan Execution Report: ${pName} (\`${pId}\`)\n\n`;
+    md += `• **Execution Status:** **${report.status}**\n`;
+    md += `• **Actions Executed:** ${s.succeeded} succeeded, ${s.failed} failed, ${s.skipped} skipped, ${s.cancelled} cancelled (Total: ${s.total})\n`;
+
+    if (report.baselineHealth && report.recalculatedHealth) {
+      const bHealth = report.baselineHealth.healthStatus;
+      const rHealth = report.recalculatedHealth.healthStatus;
+      md += `• **Health Transition:** \`${bHealth}\` ➔ \`${rHealth}\`\n`;
+    }
+
+    const nonSuccess = (report.actions || []).filter(a => a.outcome !== 'SUCCEEDED');
+    if (nonSuccess.length > 0) {
+      const notes = nonSuccess
+        .map(a => `  - \`${a.targetId}\` (${a.outcome}): ${a.error || 'Preconditions not met or skipped'}`)
+        .join('\n');
+      md += `• **Action Diagnostics:**\n${notes}\n`;
+    }
+
+    if (report.remainingNotRemediable && report.remainingNotRemediable.length > 0) {
+      md += `• **Remaining Manual Work:** ${report.remainingNotRemediable.length} non-executable items still require developer intervention.\n`;
+    }
+
+    md += `\n*Truthful Notice: Administrative status transitions unblock workflow progression; they do NOT verify source code fixes, test coverage, or physical resolution of external dependencies.*`;
+    return md;
+  }
+
+  _buildExecutionVerificationCard(report) {
+    const pName = escapeHtml(report.projectName || report.projectId);
+    const pId = escapeHtml(report.projectId);
+    const planId = escapeHtml(report.planId || 'N/A');
+    const startedAt = escapeHtml(report.startedAt ? new Date(report.startedAt).toLocaleTimeString() : 'N/A');
+    const completedAt = escapeHtml(report.completedAt ? new Date(report.completedAt).toLocaleTimeString() : 'N/A');
+
+    let statusBadgeClass = 'badge-success';
+    if (report.status === 'FAILED') statusBadgeClass = 'badge-danger';
+    else if (report.status === 'PARTIALLY_COMPLETED') statusBadgeClass = 'badge-warning';
+    else if (report.status === 'STALE_PLAN' || report.status === 'CANCELLED') statusBadgeClass = 'badge-manual';
+
+    // Actions results list
+    const actionRows = (report.actions || []).map(action => {
+      let outcomeClass = 'badge-success';
+      let outcomeIcon = '✓';
+      if (action.outcome === 'FAILED') {
+        outcomeClass = 'badge-danger';
+        outcomeIcon = '✗';
+      } else if (action.outcome === 'SKIPPED_STALE' || action.outcome === 'SKIPPED_DEPENDENCY') {
+        outcomeClass = 'badge-warning';
+        outcomeIcon = '⊘';
+      } else if (action.outcome === 'CANCELLED') {
+        outcomeClass = 'badge-manual';
+        outcomeIcon = '⏹';
+      }
+
+      // State diff
+      let diffHtml = '';
+      if (action.beforeState && action.afterState) {
+        const bStatus = escapeHtml(action.beforeState.status || 'unknown');
+        const aStatus = escapeHtml(action.afterState.status || 'unknown');
+        diffHtml = `
+          <div class="rescue-diff-row">
+            <span class="diff-label">State Transition:</span>
+            <code>${bStatus}</code> <span class="diff-arrow">➔</span> <code>${aStatus}</code>
+          </div>
+        `;
+        if (action.beforeState.blocker) {
+          diffHtml += `
+            <div class="rescue-diff-row">
+              <span class="diff-label">Blocker:</span>
+              <span class="diff-old">"${escapeHtml(action.beforeState.blocker)}"</span>
+              <span class="diff-arrow">➔</span>
+              <span class="diff-new">Cleared</span>
+            </div>
+          `;
+        }
+      } else if (action.beforeState) {
+        diffHtml = `
+          <div class="rescue-diff-row">
+            <span class="diff-label">Observed Initial State:</span>
+            <code>${escapeHtml(action.beforeState.status || 'unknown')}</code>
+          </div>
+        `;
+      }
+
+      // Verification note
+      let verifyNote = '';
+      if (action.verified) {
+        verifyNote = `<div class="rescue-verify-note success">🔍 Verified in persistence store: Status updated and blocker cleared.</div>`;
+      } else if (action.error) {
+        verifyNote = `<div class="rescue-verify-note error">⚠️ ${escapeHtml(action.error)}</div>`;
+      }
+
+      return `
+        <div class="rescue-exec-item ${escapeHtml(action.outcome.toLowerCase())}">
+          <div class="rescue-exec-header">
+            <div class="rescue-exec-title">
+              <span class="outcome-icon">${outcomeIcon}</span>
+              <strong>${escapeHtml(action.title || action.targetId)}</strong>
+              <code>${escapeHtml(action.targetId)}</code>
+            </div>
+            <span class="rescue-badge ${outcomeClass}">${escapeHtml(action.outcome)}</span>
+          </div>
+          <div class="rescue-exec-body">
+            <div class="rescue-exec-desc">${escapeHtml(action.description)}</div>
+            ${diffHtml}
+            ${verifyNote}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Health Recalculation Comparison
+    let healthCompareHtml = '';
+    if (report.baselineHealth && report.recalculatedHealth) {
+      const baseStatus = escapeHtml(report.baselineHealth.healthStatus || 'Unknown');
+      const postStatus = escapeHtml(report.recalculatedHealth.healthStatus || 'Unknown');
+      const baseBadge = baseStatus === 'Healthy' ? 'badge-success' : (baseStatus === 'At Risk' ? 'badge-danger' : 'badge-warning');
+      const postBadge = postStatus === 'Healthy' ? 'badge-success' : (postStatus === 'At Risk' ? 'badge-danger' : 'badge-warning');
+
+      const newReasons = (report.recalculatedHealth.statusReasons || []).join('; ') || 'No material risks detected.';
+
+      healthCompareHtml = `
+        <div class="rescue-section rescue-health-comparison">
+          <div class="rescue-section-title">
+            <span>📊 Health Recalculation (Persisted Data)</span>
+          </div>
+          <div class="rescue-health-compare-grid">
+            <div class="health-col">
+              <span class="col-title">Before Execution</span>
+              <span class="rescue-badge ${baseBadge}">${baseStatus}</span>
+              <div class="health-reasons-summary">${escapeHtml((report.baselineHealth.statusReasons || []).join('; ') || 'None')}</div>
+            </div>
+            <div class="health-col-arrow">➔</div>
+            <div class="health-col">
+              <span class="col-title">Recalculated Health</span>
+              <span class="rescue-badge ${postBadge}">${postStatus}</span>
+              <div class="health-reasons-summary">${escapeHtml(newReasons)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Remaining non-remediable / manual tasks
+    let manualHtml = '';
+    if (report.remainingNotRemediable && report.remainingNotRemediable.length > 0) {
+      manualHtml = `
+        <div class="rescue-section rescue-manual-section">
+          <div class="rescue-section-title">
+            <span>⚠️ Remaining Manual Interventions (${report.remainingNotRemediable.length})</span>
+          </div>
+          <div class="rescue-manual-list">
+            ${report.remainingNotRemediable.map(nr => `
+              <div class="rescue-manual-item">
+                <div class="rescue-manual-header">
+                  <strong>${escapeHtml(nr.title || nr.type)}</strong>
+                  ${nr.targetId ? `<code>${escapeHtml(nr.targetId)}</code>` : ''}
+                </div>
+                <div class="rescue-manual-rec"><strong>Required Action:</strong> ${escapeHtml(nr.recommendation)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    const s = report.summary || { total: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: 0 };
+
+    return `
+      <div class="rescue-verification-card" data-plan-id="${planId}">
+        <div class="rescue-card-header">
+          <div class="rescue-card-title">
+            <span class="rescue-icon">🛡️</span>
+            <strong>Execution &amp; Verification Report: ${pName}</strong>
+            <code>${pId}</code>
+          </div>
+          <span class="rescue-badge ${statusBadgeClass}">${escapeHtml(report.status)}</span>
+        </div>
+
+        <div class="rescue-meta-box">
+          <div class="rescue-meta-item">
+            <strong>Execution Summary:</strong>
+            ${s.succeeded} of ${s.total} actions succeeded
+            (${s.skipped} skipped, ${s.failed} failed, ${s.cancelled} cancelled)
+          </div>
+          <div class="rescue-meta-item">
+            <strong>Timing:</strong> Started at ${startedAt}, completed at ${completedAt}
+          </div>
+        </div>
+
+        <div class="rescue-section">
+          <div class="rescue-section-title">
+            <span>Verified Action Transitions</span>
+          </div>
+          <div class="rescue-exec-list">
+            ${actionRows || '<div class="rescue-empty-notice">No individual actions were executed.</div>'}
+          </div>
+        </div>
+
+        ${healthCompareHtml}
+
+        ${manualHtml}
+
+        <div class="rescue-disclaimer-box">
+          ℹ️ <strong>Truthful Verification Disclaimer:</strong>
+          <em>${escapeHtml(report.disclaimer || 'Administrative status transitions unblock workflow progression; they do NOT verify source code fixes, test coverage, or physical resolution of external dependencies.')}</em>
+        </div>
+      </div>
+    `;
+  }
+
   async _handleClarificationSelection(input, resolution) {
+    if (resolution.action === 'rescue_project') {
+      const match = resolution.candidates.find(c =>
+        c.id.toLowerCase() === input.toLowerCase() ||
+        c.name.toLowerCase() === input.toLowerCase() ||
+        c.name.toLowerCase().includes(input.toLowerCase())
+      );
+      if (match) {
+        return this._workflowRescueProject(`rescue project ${match.id}`);
+      }
+    }
     if (resolution.action === 'investigate_project') {
       const match = resolution.candidates.find(c =>
         c.id.toLowerCase() === input.toLowerCase() ||

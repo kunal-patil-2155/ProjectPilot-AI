@@ -399,8 +399,8 @@ export class ProjectStore {
       updated.completedAt = now;
       updated.blocker = null; // Clearing blocker upon completion
     } else {
-      // todo or in_progress
-      if (blockerReason === null && targetStatus !== 'blocked') {
+      // todo or in_progress: clear blocker unless a blockerReason is explicitly provided
+      if (!blockerReason || blockerReason === null) {
         updated.blocker = null;
       }
       updated.completedAt = null;

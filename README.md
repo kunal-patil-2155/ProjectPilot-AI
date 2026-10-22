@@ -13,7 +13,8 @@ Developed for the **Build, Ship, Shape: Amazon Developer Hackathon 2026** — *A
 Unlike conventional dashboards that use ad-hoc internal APIs, ProjectPilot AI is powered by the **Model Context Protocol (MCP)** using the official **Streamable HTTP** transport (`specification 2025-11-25`). Every project query, priority recommendation, status transition, and conversational workflow executes through verified, deterministic MCP tool calls over HTTP.
 
 ### Product Highlights
-* **Alexa+ Developer Operations Simulation**: Natural-language operational commands (daily priorities, project investigations, task completions, remaining work, maintenance tracking) mapped directly to MCP tool executions.
+* **Autonomous Project Rescue (Signature Capability)**: Deterministic, evidence-based project rescue: `Investigate → Diagnose → Plan → Approve → Execute → Verify`. Synthesizes remediation plans, isolates executable actions from manual recommendations, enforces explicit user approval, executes sequentially, re-reads storage to verify persistence, and recalculates live project health.
+* **Alexa+ Developer Operations Simulation**: Natural-language operational commands (daily priorities, project investigations, task completions, remaining work, maintenance tracking, and project rescue) mapped directly to MCP tool executions.
 * **Streamable HTTP MCP Server**: Conforms to MCP specification `2025-11-25` with full stateful session management, protocol version negotiation, and tool discovery.
 * **Native Browser MCP Client**: Pure ES module client communicating over `/mcp` via HTTP POST and Server-Sent Events (SSE).
 * **Transparent Priority Recommendations**: Explainable ranking algorithm considering priority tiers, deadline urgency, user-reported bugs, and blocker penalties.
@@ -45,7 +46,7 @@ Unlike conventional dashboards that use ad-hoc internal APIs, ProjectPilot AI is
 ┌────────────────────────────────────────────────────────────────┐
 │           Model Context Protocol Server (`src/mcp/`)           │
 │  • @modelcontextprotocol/sdk (Specification 2025-11-25)        │
-│  • 11 Executable Tools with Zod Schema Validation              │
+│  • 12 Executable Tools with Zod Schema Validation              │
 └───────┬───────────────────────┼────────────────────────┬───────┘
         ▼                       ▼                        ▼
 ┌──────────────┐        ┌──────────────┐        ┌────────────────┐
@@ -63,7 +64,7 @@ Unlike conventional dashboards that use ad-hoc internal APIs, ProjectPilot AI is
 
 ---
 
-## 3. Mandatory MCP Tools (11 Tools)
+## 3. Implemented MCP Tools (12 Tools)
 
 Every tool performs real operations against the data store and returns structured results:
 
@@ -80,6 +81,7 @@ Every tool performs real operations against the data store and returns structure
 | 9 | `get_project_health` | Derives truthful health metrics (distinguishes bugs, blockers, incomplete tasks). | `projectId` (optional) |
 | 10 | `get_priority_recommendations` | Computes explainable prioritization rankings for unfinished tasks with justifications. | `projectId` (optional), `limit` |
 | 11 | `list_maintenance_tasks` | Categorizes maintenance tasks by overdue, due soon (≤7d), and scheduled status. | `projectId` (optional), `includeCompleted` |
+| 12 | `generate_rescue_plan` | Synthesizes an evidence-based rescue plan with proposed actions, health projections, and manual recommendations. | `projectId` (optional), `projectName` (optional) |
 
 ---
 
@@ -87,6 +89,9 @@ Every tool performs real operations against the data store and returns structure
 
 The assistant orchestrates multi-step MCP tool calls and presents clean natural language summaries:
 
+0. **Workflow 0: Autonomous Project Rescue (Signature Capability)**
+   - *Sample Utterance:* `"Rescue project Mobile Checkout SDK"` or `"Prepare a rescue plan for DevPulse"`
+   - *Execution:* Resolves project ID, invokes `generate_rescue_plan`, presents an interactive approval card separating executable actions from manual interventions. Upon explicit button approval, sequentially executes approved actions, re-reads persisted records to verify persistence, recalculates live health, and renders a verification card with explicit truthfulness disclaimers.
 1. **Workflow 1: Daily Priorities**
    - *Sample Utterance:* `"What should I work on today?"` or `"Daily priorities"`
    - *Execution:* Calls `get_priority_recommendations` + `list_blockers`. Correlates urgency, bugs, and deadlines, highlighting open blockers.
@@ -147,46 +152,20 @@ Automated tests run using Node.js's built-in test runner (`node:test` and `node:
 npm test
 ```
 
-### Verified Test Results (32 passing, 0 failures)
+### Verified Test Results (179 passing tests across 34 suites, 0 failures)
 ```
-✔ Model Context Protocol (MCP) Streamable HTTP Server (17 tests)
-  ✔ Step 1: MCP Handshake & Protocol Version Negotiation (2025-11-25)
-  ✔ Step 2: MCP notifications/initialized notification (HTTP 202)
-  ✔ Step 3: Tool Discovery (tools/list) exposes all 11 mandatory tools
-  ✔ Tool 1: list_projects
-  ✔ Tool 2: get_project_details
-  ✔ Tool 3: create_project
-  ✔ Tool 4: update_project
-  ✔ Tool 5: list_tasks
-  ✔ Tool 6: create_task
-  ✔ Tool 7: update_task_status
-  ✔ Tool 8: list_blockers
-  ✔ Tool 9: get_project_health
-  ✔ Tool 10: get_priority_recommendations
-  ✔ Tool 11: list_maintenance_tasks
-  ✔ Error handling: tool error on invalid project query
-  ✔ Error handling: request with invalid session returns 404
-  ✔ Session Termination: HTTP DELETE /mcp cleans up session
-✔ ProjectPilot Services (3 tests)
-  ✔ HealthService calculates truthful health metrics and status
-  ✔ PriorityService transparently ranks tasks and provides explicit reasons
-  ✔ MaintenanceService groups overdue and upcoming maintenance tasks
-✔ ProjectStore CRUD & Persistence (5 tests)
-  ✔ initializes with sample data when file does not exist
-  ✔ Project CRUD operations work with validation
-  ✔ rejects invalid project input
-  ✔ Task CRUD operations and reference integrity
-  ✔ persistence across restart: new instance retains changes without overwriting
-✔ Assistant Conversational Workflows (Alexa+ Track Simulation) (7 tests)
-  ✔ Workflow 1: Daily priorities
-  ✔ Workflow 2: Project investigation
-  ✔ Workflow 3: Complete a task
-  ✔ Workflow 4: Remaining work
-  ✔ Workflow 5: Maintenance review
-  ✔ Ambiguity resolution: prompts user when multiple tasks match
-  ✔ Honest fallback for unsupported or out-of-scope requests
+✔ Evidence-Based Project Intelligence & Truthful Health
+✔ Model Context Protocol (MCP) Streamable HTTP Server
+✔ MCP Tool: generate_rescue_plan (12th Tool Integration)
+✔ Autonomous Project Rescue - Sequential Action Execution & Verification (Phase 4)
+✔ Autonomous Project Rescue Planning Service (Phase 1)
+✔ Autonomous Project Rescue - Conversational Workflow (Phase 3)
+✔ ProjectPilot AI - Security & Hardening Audit Tests
+✔ ProjectPilot Services
+✔ ProjectStore CRUD & Persistence
+✔ Assistant Conversational Workflows (Alexa+ Track Simulation)
 
-Total: 32 tests passed (0 failures)
+Total: 179 tests passed across 34 suites (0 failures, 0 skipped)
 ```
 
 ---
@@ -252,40 +231,55 @@ curl -i -X POST http://localhost:3000/mcp \
 
 In accordance with hackathon guidelines:
 1. **Real Implementations**:
-   - MCP Server and Client using Streamable HTTP transport and MCP specification `2025-11-25`.
-   - Real JSON storage with safe atomic writes (`.tmp` + rename).
-   - Real CRUD for projects and tasks with validation and referential integrity.
-   - Real priority ranking algorithm based on explicit priority, due dates, bugs, and blockers.
-   - Real health calculations derived strictly from persisted records.
-2. **Simulations & Intentional Boundaries**:
+   - **MCP Streamable HTTP Transport**: Conforms to MCP specification `2025-11-25` over HTTP with stateful session management and SSE streaming.
+   - **12 Registered MCP Tools**: Real, schema-validated MCP tools discovered via `tools/list`, including the signature `generate_rescue_plan`.
+   - **Autonomous Project Rescue**: Real multi-step workflow (`Investigate → Diagnose → Plan → Approve → Execute → Verify`).
+   - **Precondition & Freshness Verification**: Validates task status, project ID, and blocker text against current persisted data before executing each action (`_checkPreconditions`).
+   - **Re-Read Write Verification**: Re-reads database records from disk after write execution to verify persistence before reporting success.
+   - **Persistent Storage**: Atomic file persistence (`data/store.json`) using safe temp-file-and-rename patterns (`.tmp` + `rename`).
+   - **Deterministic Health & Priority Logic**: Evidence-backed health ratings and transparent priority ranking derived strictly from persisted records.
+
+2. **Truthful Disclosures & Intentional Architectural Boundaries**:
+   - **Approval Authorization Gating**: The rescue plan approval step is gated client-side by the `AssistantOrchestrator` and `RescueExecutionEngine`. The MCP server enforces transport authentication (via `MCP_API_KEY` / Bearer token) and input parameter schema validation via Zod, but individual MCP write tools (`update_task_status`, `update_project`) execute independently over HTTP if transport authentication passes.
+   - **Administrative Status Transitions vs. Physical Code Fixes**: Remediation actions update project management records (e.g. marking a task `in_progress` or unblocking a task). They do **not** repair underlying source code, modify repositories, or compile software. The system explicitly disclaims that administrative state changes require human engineering for physical code fixes.
+   - **Blocker Field Clearing Semantics**: In `store.updateTaskStatus`, transitioning a task to `in_progress` or `todo` automatically sets `blocker = null` unless an explicit new blocker reason is provided.
+   - **Concurrency Scope**: A client-side concurrency mutex (`isExecuting` flag) prevents rapid duplicate clicks within a single browser tab. It does not provide cross-tab or distributed multi-user concurrency locking.
    - **Alexa+ Interface**: This is a browser-based simulation of conversational Alexa+ interactions (incorporating Web Speech synthesis). It is **not** an official Amazon hardware integration and makes no claim to gated Alexa+ partner APIs.
-   - **Intent Routing**: The conversational orchestrator uses a deterministic intent router that converts natural speech requests into concrete MCP tool calls. It is not an unconstrained generative LLM.
-   - **External Service Monitoring**: The application does not probe external servers, cloud providers, or domain registrars. Maintenance tasks represent developer-recorded schedules.
+   - **Intent Routing**: The conversational orchestrator uses deterministic intent routing that converts natural speech requests into concrete MCP tool calls. It is not an unconstrained generative LLM.
+   - **External Service Monitoring**: The application does not probe external servers, cloud providers, or git remotes. Maintenance tasks represent developer-recorded schedules.
 
 ---
 
 ## 9. 3-Minute Video Demonstration Script
 
-* **[0:00 - 0:30] Introduction & Mission**
-  - "Hello! This is ProjectPilot AI, an operations assistant and developer dashboard created for the Build, Ship, Shape: Amazon Developer Hackathon 2026, targeting the Alexa+ track."
-  - "Software developers constantly balance multiple projects, unfinished tasks, and sudden blockers. ProjectPilot AI bridges these operations with the Model Context Protocol over Streamable HTTP."
-* **[0:30 - 1:15] MCP Architecture & Live Protocol Inspector**
-  - Click on the **MCP Inspector** pill in the top header.
-  - "Notice the live MCP connection status. We negotiated protocol version `2025-11-25` over Streamable HTTP. All 11 required MCP tools are discovered and listed here with their input schemas."
-  - Show the live telemetry log updating in real time with JSON-RPC requests and responses.
-* **[1:15 - 2:00] Daily Priorities & Project Investigation Workflows**
-  - In the Assistant tab, click **Daily priorities** (`"What should I work on today?"`).
-  - Show the tool call `get_priority_recommendations` and `list_blockers` in the chat tracer.
-  - Explain the transparent scoring: Critical priority (+40 pts), bug urgency (+15 pts), and active blockers.
-  - Run `"Investigate Mobile Checkout SDK"`. The assistant invokes `get_project_details` and surfaces the active authentication blocker.
-* **[2:00 - 2:40] Task Completion & State Verification**
-  - Run `"Complete task 'Resolve memory spike'"`.
-  - Show the assistant calling `update_task_status` and explicitly verifying the stored state before confirming completion.
-  - Switch to the Tasks tab: show that the task status is now DONE and the progress bar has updated.
-* **[2:40 - 3:00] Maintenance Review & Conclusion**
-  - Run `"Review maintenance tasks"`.
-  - Show the overdue PostgreSQL vacuum task and upcoming SSL certificate rotation.
-  - "With 32 passing automated tests, atomic JSON persistence, and 100% compliant MCP Streamable HTTP transport, ProjectPilot AI is testable, reliable, and submission-ready. Thank you!"
+An 8-part demonstration walkthrough for hackathon judges showcasing the signature Autonomous Project Rescue capability:
+
+* **[0:00 - 0:20] Step 1: Introduction & Mission (Alexa+ Track)**
+  - *"Welcome to ProjectPilot AI, an operations assistant and developer dashboard built for the Build, Ship, Shape: Amazon Developer Hackathon 2026 targeting the Alexa+ Track."*
+  - *"Software developers constantly juggle multiple projects, competing deadlines, and unforeseen blockers. ProjectPilot AI bridges developer operations with the Model Context Protocol over Streamable HTTP, featuring our signature capability: Autonomous Project Rescue."*
+* **[0:20 - 0:45] Step 2: MCP Architecture & Live Protocol Inspector**
+  - Click the **MCP Inspector** pill in the top header.
+  - *"Notice the live MCP connection status. We negotiated protocol version `2025-11-25` over Streamable HTTP. All 12 core MCP tools are discovered and listed here with full Zod input schemas."*
+  - Show the live JSON-RPC telemetry log streaming real-time request and response payloads.
+* **[0:45 - 1:10] Step 3: Project Investigation & Honest Health Intelligence**
+  - Switch to the Assistant tab and run: `"Inspect Mobile Checkout SDK"`.
+  - *"The assistant invokes `get_project_details` and `get_project_health`. Notice our truthful health model: rather than reporting false optimism, it accurately rates the project as At Risk because of an active critical blocker: 'Upstream identity service rejects concurrent token refresh'."*
+* **[1:10 - 1:35] Step 4: Autonomous Rescue Plan Generation (Signature Capability)**
+  - Speak or type: `"Rescue project Mobile Checkout SDK"`.
+  - *"The assistant initiates our signature rescue workflow by invoking the `generate_rescue_plan` MCP tool. It synthesizes an evidence-based plan, projecting the health impact and clearly separating executable database actions from manual engineering recommendations."*
+* **[1:35 - 2:05] Step 5: Selective Approval & Safety Controls**
+  - Point out the interactive approval card with checkboxes.
+  - *"Safety is paramount. The assistant enforces an explicit approval gate—conversational affirmations cannot trigger writes. We can selectively approve actions or cancel the plan without any state changes. We'll approve the unblock action."*
+  - Click **Approve Selected**.
+* **[2:05 - 2:25] Step 6: Sequential Action Execution & Re-read Verification**
+  - Watch the live progress state transition from `AWAITING_APPROVAL` to `EXECUTING` to `VERIFYING`.
+  - *"The execution engine checks preconditions against live store data to prevent stale-state race conditions, calls `update_task_status`, and then directly re-reads disk storage to verify that the write actually persisted."*
+* **[2:25 - 2:45] Step 7: Live Health Recalculation & Truthful Disclaimers**
+  - Point to the completed Verification Card.
+  - *"Post-execution, ProjectPilot recalculates live health from the fresh database state. Crucially, the assistant includes an honest disclosure: it reports that administrative status was transitioned, but explicitly warns that underlying code changes still require manual developer intervention."*
+* **[2:45 - 3:00] Step 8: Persistence Verification & Closing**
+  - Navigate to the Tasks tab to show the task status updated to `In Progress` with the blocker cleared. Refresh the browser to prove persistence across sessions.
+  - *"With 179 passing automated tests across 34 suites, atomic JSON persistence, and full MCP specification compliance, ProjectPilot AI is safe, transparent, and ready for evaluation. Thank you!"*
 
 ---
 

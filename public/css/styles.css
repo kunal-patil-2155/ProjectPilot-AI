@@ -1338,3 +1338,496 @@ body {
   color: var(--text-muted);
   font-size: 0.88rem;
 }
+
+/* ==========================================================================
+   Autonomous Project Rescue: Approval Card Styles (Phase 3)
+   ========================================================================== */
+
+.rescue-plan-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-top: 12px;
+  box-shadow: var(--shadow-md);
+  font-size: 0.86rem;
+}
+
+.rescue-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.rescue-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+}
+
+.rescue-card-title code {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background-color: var(--bg-surface-elevated);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-info);
+}
+
+.rescue-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge-risk-critical {
+  background-color: rgba(244, 63, 94, 0.2);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+
+.badge-risk-medium {
+  background-color: rgba(245, 158, 11, 0.2);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning);
+}
+
+.badge-risk-low {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: var(--color-success);
+  border: 1px solid var(--color-success);
+}
+
+.badge-executable {
+  background-color: rgba(99, 102, 241, 0.2);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.badge-manual {
+  background-color: rgba(100, 116, 139, 0.2);
+  color: var(--text-muted);
+  border: 1px solid var(--text-muted);
+}
+
+.rescue-meta-box {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.rescue-limitations-list,
+.rescue-manual-checklist {
+  list-style: disc;
+  padding-left: 20px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.rescue-section {
+  margin-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+}
+
+.rescue-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 0.88rem;
+  margin-bottom: 10px;
+}
+
+.rescue-select-all-row {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background-color: var(--bg-surface-elevated);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+}
+
+.rescue-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rescue-actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rescue-action-item {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: all 0.2s;
+}
+
+.rescue-action-item.selected {
+  border-color: var(--color-primary);
+  background-color: rgba(99, 102, 241, 0.05);
+}
+
+.rescue-action-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.rescue-action-badges {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rescue-action-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.rescue-action-meta code {
+  font-family: var(--font-mono);
+  background-color: var(--bg-surface-elevated);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--text-primary);
+}
+
+.rescue-action-detail {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rescue-manual-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rescue-manual-item {
+  background-color: var(--bg-app);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 0.78rem;
+}
+
+.rescue-manual-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: var(--color-warning);
+}
+
+.rescue-projection-section {
+  background-color: var(--bg-app);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+.rescue-projection-body {
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rescue-projection-body code {
+  font-family: var(--font-mono);
+  color: var(--color-success);
+}
+
+.rescue-projection-disclaimer {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.rescue-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.rescue-phase-notice {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.rescue-card-cancelled {
+  opacity: 0.55;
+  filter: grayscale(0.6);
+  pointer-events: none;
+}
+
+.rescue-empty-notice {
+  padding: 12px;
+  background-color: var(--bg-app);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+}
+
+/* ==========================================================================
+   Phase 4: Autonomous Rescue Execution & Post-Execution Verification Styles
+   ========================================================================== */
+
+.rescue-verification-card {
+  margin-top: 12px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--accent-success);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rescue-card-executed {
+  border-left-color: var(--accent-primary);
+  opacity: 0.9;
+}
+
+.rescue-exec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rescue-exec-item {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rescue-exec-item.succeeded {
+  border-left: 3px solid var(--accent-success);
+}
+
+.rescue-exec-item.failed {
+  border-left: 3px solid var(--accent-danger);
+}
+
+.rescue-exec-item.skipped_stale,
+.rescue-exec-item.skipped_dependency {
+  border-left: 3px solid var(--accent-warning);
+}
+
+.rescue-exec-item.cancelled {
+  border-left: 3px solid var(--text-muted);
+}
+
+.rescue-exec-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rescue-exec-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+
+.rescue-exec-title .outcome-icon {
+  font-weight: bold;
+}
+
+.rescue-exec-title code {
+  font-size: 0.75rem;
+  background-color: var(--bg-code);
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--text-secondary);
+}
+
+.rescue-exec-body {
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rescue-exec-desc {
+  color: var(--text-secondary);
+}
+
+.rescue-diff-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  margin-top: 2px;
+}
+
+.rescue-diff-row .diff-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.rescue-diff-row .diff-arrow {
+  color: var(--accent-primary);
+  font-weight: bold;
+}
+
+.rescue-diff-row .diff-old {
+  color: var(--accent-danger);
+}
+
+.rescue-diff-row .diff-new {
+  color: var(--accent-success);
+  font-weight: 600;
+}
+
+.rescue-verify-note {
+  font-size: 0.78rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+.rescue-verify-note.success {
+  background-color: rgba(34, 197, 94, 0.1);
+  color: var(--accent-success);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.rescue-verify-note.error {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--accent-danger);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.rescue-health-compare-grid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background-color: var(--bg-app);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.rescue-health-compare-grid .health-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rescue-health-compare-grid .col-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.rescue-health-compare-grid .health-reasons-summary {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.rescue-health-compare-grid .health-col-arrow {
+  font-size: 1.4rem;
+  color: var(--accent-primary);
+  font-weight: bold;
+}
+
+.rescue-disclaimer-box {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* ==========================================================================
+   Mobile & Responsive Layout Enhancements (max-width: 768px)
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .app-sidebar {
+    width: var(--sidebar-collapsed-width);
+  }
+
+  .app-sidebar .brand-tagline,
+  .app-sidebar .nav-item span:not(.nav-counter),
+  .app-sidebar .sidebar-footer {
+    display: none;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .rescue-card-header,
+  .rescue-action-header,
+  .rescue-exec-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .rescue-action-badges {
+    flex-wrap: wrap;
+  }
+
+  .rescue-controls {
+    flex-wrap: wrap;
+  }
+
+  .rescue-health-compare-grid {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rescue-health-compare-grid .health-col-arrow {
+    text-align: center;
+    transform: rotate(90deg);
+  }
+}

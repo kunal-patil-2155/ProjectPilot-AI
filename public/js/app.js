@@ -900,14 +900,21 @@ async function executeAssistantPrompt(promptText) {
         `;
       }
 
+      const rescueCardHtml = outcome.cardHtml || '';
+
       msgEl.innerHTML = `
         <div class="msg-sender">ProjectPilot Assistant</div>
         <div class="msg-text">
           ${formatMarkdown(outcome.explanation)}
+          ${rescueCardHtml}
           ${toolInvocationsHtml}
           ${clarificationButtons}
         </div>
       `;
+
+      if (outcome.cardHtml) {
+        setupRescueCardListeners(msgEl.querySelector('.rescue-plan-card'));
+      }
 
       msgEl.querySelectorAll('.clarification-chip').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -942,7 +949,142 @@ async function executeAssistantPrompt(promptText) {
   if (stream) stream.scrollTop = stream.scrollHeight;
 }
 
-function appendChatMessage(type, sender, text, elementId = null) {
+function setupRescueCardListeners(card) {
+  if (!card || card.dataset.initialized) return;
+  card.dataset.initialized = 'true';
+
+  const approveBtn = card.querySelector('.rescue-approve-btn');
+  const cancelBtn = card.querySelector('.rescue-cancel-btn');
+  const selectAll = card.querySelector('.rescue-select-all');
+  const checkboxes = card.querySelectorAll('.rescue-action-checkbox');
+
+  function updateApproveButton() {
+    if (!approveBtn) return;
+    const selectedCount = state.orchestrator.selectedActionIds.size;
+    approveBtn.textContent = `Approve Selected (${selectedCount})`;
+    approveBtn.disabled = selectedCount === 0;
+
+    if (selectAll) {
+      selectAll.checked = selectedCount === checkboxes.length && checkboxes.length > 0;
+    }
+  }
+
+  checkboxes.forEach(cb => {
+    cb.addEventListener('change', () => {
+      const actionId = cb.dataset.actionId;
+      try {
+        state.orchestrator.toggleActionSelection(actionId, cb.checked);
+        const item = cb.closest('.rescue-action-item');
+        if (item) {
+          item.classList.toggle('selected', cb.checked);
+        }
+        updateApproveButton();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  });
+
+  if (selectAll) {
+    selectAll.addEventListener('change', () => {
+      try {
+        state.orchestrator.selectAllActions(selectAll.checked);
+        checkboxes.forEach(cb => {
+          cb.checked = selectAll.checked;
+          const item = cb.closest('.rescue-action-item');
+          if (item) {
+            item.classList.toggle('selected', selectAll.checked);
+          }
+        });
+        updateApproveButton();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      const pName = state.orchestrator.pendingRescuePlan?.projectName || 'Project';
+      state.orchestrator.cancelRescuePlan();
+      card.classList.add('rescue-card-cancelled');
+      card.querySelectorAll('button, input').forEach(el => el.disabled = true);
+      showToast('Rescue plan cancelled', 'info');
+      appendChatMessage('assistant', 'ProjectPilot Assistant', `❌ The rescue plan for **${pName}** has been cancelled. No persistent actions were executed.`);
+    });
+  }
+
+  if (approveBtn) {
+    approveBtn.addEventListener('click', async () => {
+      const selectedCount = state.orchestrator.selectedActionIds.size;
+      if (selectedCount === 0) {
+        showToast('Please select at least one action to execute, or cancel the plan.', 'warning');
+        return;
+      }
+
+      // Concurrency guard: disable buttons immediately to prevent duplicate clicks
+      approveBtn.disabled = true;
+      if (cancelBtn) cancelBtn.disabled = true;
+      card.querySelectorAll('input').forEach(el => el.disabled = true);
+      approveBtn.innerHTML = '⚙️ Executing Actions...';
+
+      showToast(`Executing ${selectedCount} approved action(s) sequentially...`, 'info');
+
+      try {
+        const executionResult = await state.orchestrator.executeRescuePlan((actionId, outcome, record) => {
+          const actionItem = card.querySelector(`[data-action-id="${actionId}"]`);
+          if (actionItem) {
+            const badges = actionItem.querySelector('.rescue-action-badges');
+            if (badges) {
+              let progBadge = badges.querySelector('.rescue-exec-badge');
+              if (!progBadge) {
+                progBadge = document.createElement('span');
+                progBadge.className = 'rescue-badge rescue-exec-badge';
+                badges.appendChild(progBadge);
+              }
+              progBadge.textContent = outcome;
+              if (outcome === 'SUCCEEDED') progBadge.className = 'rescue-badge rescue-exec-badge badge-success';
+              else if (outcome === 'FAILED') progBadge.className = 'rescue-badge rescue-exec-badge badge-danger';
+              else if (outcome === 'SKIPPED_STALE' || outcome === 'SKIPPED_DEPENDENCY') progBadge.className = 'rescue-badge rescue-exec-badge badge-warning';
+              else if (outcome === 'RUNNING') progBadge.className = 'rescue-badge rescue-exec-badge badge-running';
+            }
+          }
+        });
+
+        // Mark card completed
+        card.classList.add('rescue-card-executed');
+        approveBtn.textContent = 'Execution Completed';
+
+        // Render verification card message in chat
+        appendChatMessage(
+          'assistant',
+          'ProjectPilot Assistant',
+          executionResult.explanation,
+          null,
+          executionResult.cardHtml
+        );
+
+        showToast(`Rescue execution finished: ${executionResult.report.status}`, 'success');
+
+        // Refresh UI state
+        try {
+          if (typeof loadProjects === 'function') await loadProjects();
+          if (typeof loadDashboardMetrics === 'function') await loadDashboardMetrics();
+        } catch (refreshErr) {
+          console.warn('UI refresh warning after rescue execution:', refreshErr);
+        }
+      } catch (err) {
+        showToast(`Execution failed: ${err.message}`, 'error');
+        approveBtn.disabled = false;
+        if (cancelBtn) cancelBtn.disabled = false;
+        card.querySelectorAll('input').forEach(el => el.disabled = false);
+        approveBtn.textContent = `Approve Selected (${state.orchestrator.selectedActionIds.size})`;
+      }
+    });
+  }
+}
+
+function appendChatMessage(type, sender, text, elementId = null, cardHtml = null) {
   const stream = document.getElementById('chatMessageStream');
   if (!stream) return;
 
@@ -953,7 +1095,10 @@ function appendChatMessage(type, sender, text, elementId = null) {
     <div class="msg-avatar">${type === 'user' ? 'DEV' : 'AI'}</div>
     <div class="msg-body" ${elementId ? `id="${elementId}"` : ''}>
       <div class="msg-sender">${escapeHtml(sender)}</div>
-      <div class="msg-text">${formatMarkdown(text)}</div>
+      <div class="msg-text">
+        ${formatMarkdown(text)}
+        ${cardHtml || ''}
+      </div>
     </div>
   `;
 
