@@ -7,6 +7,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import crypto, { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -40,7 +41,23 @@ const MIME_TYPES = {
  * @param {Object} options.rateLimit - Optional rate limiting options { windowMs, maxRequests, enabled }
  */
 export async function createServer(options = {}) {
-  const storePath = options.storePath || path.resolve(__dirname, '..', 'data', 'store.json');
+  const defaultStorePath = process.env.VERCEL
+    ? path.join(os.tmpdir(), 'projectpilot-store.json')
+    : path.resolve(__dirname, '..', 'data', 'store.json');
+  const storePath = options.storePath || defaultStorePath;
+
+  // On serverless environments (e.g. Vercel), copy seed data to /tmp if it doesn't exist
+  if (process.env.VERCEL && !fs.existsSync(storePath)) {
+    const seedPath = path.resolve(__dirname, '..', 'data', 'store.json');
+    if (fs.existsSync(seedPath)) {
+      try {
+        fs.copyFileSync(seedPath, storePath);
+      } catch {
+        // Fallback: store.init() will initialize if missing
+      }
+    }
+  }
+
   const store = new ProjectStore(storePath);
   await store.init();
 
@@ -79,11 +96,14 @@ export async function createServer(options = {}) {
       return false; // Origin not allowed
     }
 
-    // Default development policy: allow localhost, 127.0.0.1, and same-host
+    // Default development policy: allow localhost, 127.0.0.1, Vercel deployments, and same-host
     try {
       const parsedOrigin = new URL(origin);
       const host = parsedOrigin.hostname;
       if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+        return origin;
+      }
+      if (host.endsWith('.vercel.app')) {
         return origin;
       }
       const reqHost = req.headers.host ? req.headers.host.split(':')[0] : null;
@@ -160,7 +180,8 @@ export async function createServer(options = {}) {
   }
 
   const httpServer = http.createServer(async (req, res) => {
-    const clientIp = req.socket.remoteAddress || '127.0.0.1';
+    const forwarded = req.headers['x-forwarded-for'];
+    const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null) || req.socket?.remoteAddress || '127.0.0.1';
 
     // 1. Rate Limiting Check
     const rateCheck = rateLimiter.isAllowed(clientIp);
@@ -199,7 +220,9 @@ export async function createServer(options = {}) {
     }
 
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const pathname = parsedUrl.pathname;
+    const routeParam = parsedUrl.searchParams.get('route');
+    const matchedPath = req.headers['x-matched-path'] || req.headers['x-forwarded-uri'];
+    const pathname = routeParam || (matchedPath ? new URL(matchedPath, 'http://localhost').pathname : parsedUrl.pathname);
 
     // 3. MCP Streamable HTTP Endpoint
     if (pathname === '/mcp') {
@@ -281,7 +304,7 @@ export async function createServer(options = {}) {
         }
 
         try {
-          await transport.handleRequest(req, res);
+          await transport.handleRequest(req, res, req.body);
           if (transport.sessionId && !sessions.has(transport.sessionId)) {
             sessions.set(transport.sessionId, { transport, createdAt: Date.now() });
           }
@@ -330,7 +353,7 @@ export async function createServer(options = {}) {
     }
 
     // 4. Diagnostic & Health Endpoint (Discloses operational stats, no secrets)
-    if (pathname === '/api/info') {
+    if (pathname === '/api/info' || pathname === '/api' || pathname === '/api/') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         product: 'ProjectPilot AI',
@@ -449,6 +472,23 @@ export async function createServer(options = {}) {
       });
     }
   };
+}
+
+let defaultServerInstance = null;
+let defaultServerPromise = null;
+
+/**
+ * Serverless request handler for environments like Vercel.
+ * Lazily initializes and caches a single HTTP server instance.
+ */
+export default async function handler(req, res) {
+  if (!defaultServerInstance) {
+    if (!defaultServerPromise) {
+      defaultServerPromise = createServer();
+    }
+    defaultServerInstance = await defaultServerPromise;
+  }
+  defaultServerInstance.server.emit('request', req, res);
 }
 
 // Standalone execution entrypoint

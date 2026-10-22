@@ -177,6 +177,14 @@ export class McpBrowserClient {
       body: JSON.stringify(payload)
     });
 
+    if (res.status === 404 && this.sessionId) {
+      // Session expired or serverless container recycled; reconnect and retry once
+      this.connected = false;
+      this.sessionId = null;
+      await this.connect();
+      return this.listTools();
+    }
+
     const data = await this._parseResponse(res);
     this._emit('response', { stage: 'tools/list', data });
 
@@ -217,6 +225,14 @@ export class McpBrowserClient {
       headers,
       body: JSON.stringify(payload)
     });
+
+    if (res.status === 404 && this.sessionId) {
+      // Session expired or serverless container recycled; reconnect and retry once
+      this.connected = false;
+      this.sessionId = null;
+      await this.connect();
+      return this.callTool(name, args);
+    }
 
     const data = await this._parseResponse(res);
     this._emit('tool_call_result', { name, args, data });

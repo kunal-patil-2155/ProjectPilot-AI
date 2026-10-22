@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "functions": {
+    "api/*.js": {
+      "includeFiles": "data/store.json"
+    }
+  },
+  "rewrites": [
+    { "source": "/mcp", "destination": "/api?route=/mcp" },
+    { "source": "/api/info", "destination": "/api?route=/api/info" },
+    { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/", "destination": "/index.html" }
+  ]
+}
