@@ -7,11 +7,37 @@
 export const GENERIC_PROJECT_WORDS = new Set([
   'app', 'apps', 'project', 'projects', 'system', 'systems',
   'management', 'service', 'services', 'tool', 'tools', 'platform',
-  'the', 'a', 'an', 'my', 'our', 'this', 'and', 'or', 'for', 'of', 'in', 'on', 'to'
+  'the', 'a', 'an', 'my', 'our', 'this', 'and', 'or', 'for', 'of', 'in', 'on', 'to',
+  // Multilingual markers & pronouns (Hindi & Marathi)
+  'mera', 'meri', 'mere', 'majha', 'majhi', 'majhe', 'amcha', 'amchi', 'amche',
+  'apna', 'apni', 'apne', 'ka', 'ki', 'ke', 'madhe', 'cha', 'chi', 'che', 'ko', 'la',
+  'baddal', 'vishayi', 'kiti', 'kay', 'kya', 'hai', 'aahe'
 ]);
 
 import { RescueExecutionEngine, ACTION_OUTCOMES, ALLOWED_EXECUTION_TOOLS, ALLOWED_ACTION_TYPES } from './rescueExecutionEngine.js';
 export { RescueExecutionEngine, ACTION_OUTCOMES, ALLOWED_EXECUTION_TOOLS, ALLOWED_ACTION_TYPES };
+
+import {
+  SpellingNormalizer,
+  damerauLevenshtein,
+  LanguageDetector,
+  ConversationMemory,
+  IntentClassifier,
+  NaturalResponseEngine,
+  ModelProvider,
+  LocalNaturalIntelligenceEngine
+} from './nlu/index.js';
+
+export {
+  SpellingNormalizer,
+  damerauLevenshtein,
+  LanguageDetector,
+  ConversationMemory,
+  IntentClassifier,
+  NaturalResponseEngine,
+  ModelProvider,
+  LocalNaturalIntelligenceEngine
+};
 
 /**
  * Explicit state model for the autonomous rescue workflow (Phase 4).
@@ -209,9 +235,12 @@ export function extractProjectQuery(rawText) {
   // Strip trailing polite/filler words
   text = text.replace(/\s+(doing|please|now)$/i, '').trim();
 
-  // If input is purely a command or command + filler (e.g. "investigate project", "inspect the project")
+  // If input is purely a command or command + filler (e.g. "investigate project", "inspect the project", "mera project status batao")
   const strippedCommandOnly = text.replace(
-    /^(?:investigate|inspect|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|tell\s+me\s+about|give\s+me(?:\s+the)?\s+details(?:\s+about|\s+on|\s+for|\s+of)?|details|status|health)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project)?$/i,
+    /^(?:investigate|inspect|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|tell\s+me\s+about|give\s+me(?:\s+the)?\s+details(?:\s+about|\s+on|\s+for|\s+of)?|details|status|health)\s+(?:the\s+|my\s+|our\s+|this\s+|mera\s+|meri\s+|majha\s+|majhi\s+)?(?:project)?$/i,
+    ''
+  ).replace(
+    /^(?:mera|meri|mere|majha|majhi|majhe|amcha|amchi|apna|aple)\s+(?:project|app)?(?:\s+(?:ka|ki|ke|cha|chi|che)\s+(?:status|health|report)\s+(?:batao|sanga))?$/i,
     ''
   ).trim();
   if (!strippedCommandOnly) {
@@ -230,6 +259,8 @@ export function extractProjectQuery(rawText) {
     /^(?:investigate|inspect|audit|examine)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^check(?:\s+out)?\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^(?:details|status|health)\s+(?:of|about|for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^(?:mera|meri|mere|majha|majhi|majhe|amcha|amchi|apna|aple)\s+(?:project\s+|app\s+)?(.+?)(?:\s+(?:ka|ki|ke|cha|chi|che)\s+(?:status|health|tast|task|kam|kaam|report)(?:\s+(?:batao|sanga))?)?$/i,
+    /^(.+?)\s+(?:ka|ki|ke|cha|chi|che)\s+(?:status|health|details|report|tast|task|kam|kaam)(?:\s+(?:batao|sanga))?$/i,
     /^project\s+(.+)$/i
   ];
 
@@ -369,6 +400,33 @@ export function resolveProject(rawText, projects) {
   }
 
   // ==========================================
+  // Priority 4.5: Fuzzy project-name match (typo tolerance via Damerau-Levenshtein)
+  // ==========================================
+  for (const q of candidateQueries) {
+    const normQ = normalizeForComparison(q);
+    if (!normQ || normQ.length < 3) continue;
+
+    const fuzzyCandidates = projects.map(p => {
+      const pNorm = normalizeForComparison(p.name);
+      const dist = damerauLevenshtein(normQ, pNorm);
+      const maxLen = Math.max(normQ.length, pNorm.length);
+      const similarity = 1 - (dist / maxLen);
+      return { project: p, dist, similarity };
+    }).filter(c => c.dist <= 2 || c.similarity >= 0.75);
+
+    if (fuzzyCandidates.length === 1) {
+      return { status: 'matched', project: fuzzyCandidates[0].project, matchedBy: 'fuzzy_levenshtein' };
+    }
+    if (fuzzyCandidates.length > 1) {
+      fuzzyCandidates.sort((a, b) => a.dist - b.dist);
+      if (fuzzyCandidates[0].dist < fuzzyCandidates[1].dist) {
+        return { status: 'matched', project: fuzzyCandidates[0].project, matchedBy: 'fuzzy_levenshtein' };
+      }
+      return { status: 'ambiguous', candidates: fuzzyCandidates.map(c => c.project), matchedBy: 'fuzzy_levenshtein' };
+    }
+  }
+
+  // ==========================================
   // Priority 5: Category matching (only if genuinely refers to a category)
   // ==========================================
   const categoryMatches = projects.filter(p => {
@@ -390,8 +448,9 @@ export function resolveProject(rawText, projects) {
 export class AssistantOrchestrator {
   /**
    * @param {import('./api/mcpClient.js').McpBrowserClient} mcpClient
+   * @param {Object} [options={}]
    */
-  constructor(mcpClient) {
+  constructor(mcpClient, options = {}) {
     this.mcpClient = mcpClient;
     this.pendingResolution = null; // Used when clarifying ambiguous tasks/projects
     this.rescueState = RESCUE_STATES.IDLE;
@@ -399,7 +458,15 @@ export class AssistantOrchestrator {
     this.selectedActionIds = new Set();
     this.executionEngine = new RescueExecutionEngine(mcpClient);
     this.lastExecutionReport = null;
-    this.executionMode = 'APPROVE'; // ASK | APPROVE | AUTOPILOT
+    this.executionMode = options.executionMode || 'APPROVE'; // ASK | APPROVE | AUTOPILOT
+
+    // Natural Intelligence & Multilingual Understanding
+    this.spellingNormalizer = options.spellingNormalizer || new SpellingNormalizer();
+    this.languageDetector = options.languageDetector || new LanguageDetector();
+    this.memory = options.memory || new ConversationMemory();
+    this.intentClassifier = options.intentClassifier || new IntentClassifier({ memory: this.memory });
+    this.responseEngine = options.responseEngine || new NaturalResponseEngine();
+    this.modelProvider = options.modelProvider || new LocalNaturalIntelligenceEngine();
   }
 
   setExecutionMode(mode) {
@@ -496,9 +563,151 @@ export class AssistantOrchestrator {
     }
 
     // -------------------------------------------------------------
+    // Natural Intelligence & Multilingual Understanding
+    // -------------------------------------------------------------
+    // 1. Language Detection & Preference Tracking
+    const langInfo = this.languageDetector.detect(text);
+    const detectedLang = langInfo.language;
+    if (langInfo.isSwitchCommand || (detectedLang !== 'en' && langInfo.confidence >= 0.7)) {
+      this.memory.preferredLanguage = detectedLang;
+    }
+    const activeLang = langInfo.requestedLanguage || (detectedLang !== 'en' ? detectedLang : this.memory.preferredLanguage);
+
+    // 2. Spelling & Typo Normalization (protecting identifiers/IDs/code)
+    const normResult = this.spellingNormalizer.normalize(text);
+    const normalizedText = normResult.normalized;
+    const normLower = normalizedText.toLowerCase();
+
+    // 3. Anaphora & Context Memory Resolution
+    const anaphora = this.memory.resolveAnaphora(text) || this.memory.resolveAnaphora(normalizedText);
+
+    // 4. Intent Classification
+    const classified = this.intentClassifier.classify(normalizedText, langInfo);
+
+    // 5. Record user turn in memory
+    this.memory.recordTurn('user', text, classified.intent);
+
+    // -------------------------------------------------------------
+    // Greetings (Multilingual)
+    // -------------------------------------------------------------
+    if (classified.intent === 'GREETING') {
+      return {
+        workflow: 'greeting',
+        toolCalls: [],
+        explanation: this.responseEngine.formatGreeting(activeLang)
+      };
+    }
+
+    // -------------------------------------------------------------
+    // Context Follow-up 1: Findings Summary ("What did you find? Explain it in English.")
+    // -------------------------------------------------------------
+    if (anaphora?.anaphoraType === 'FINDINGS_REF') {
+      const inv = this.memory.lastInvestigation;
+      if (inv && inv.project) {
+        const pName = inv.project.name || inv.project.id;
+        const hStatus = inv.health?.healthStatus || 'Evaluated';
+        const blockers = inv.blockers || [];
+        let exp = `### 🔍 Investigation Findings: **${pName}**\n\n`;
+        exp += `• **Health Classification:** \`${hStatus}\`\n`;
+        exp += `• **Active Blockers Identified:** ${blockers.length}\n`;
+        if (blockers.length > 0) {
+          blockers.forEach((b, idx) => {
+            exp += `  ${idx + 1}. **${b.taskTitle || b.title || b.id}:** ${b.blockerReason || b.blocker}\n`;
+          });
+        }
+        exp += `\n**Verified Evidence:** Data loaded directly from local database records.\n`;
+        exp += `**Next Action:** You can say "same issue fix karo" or "prepare rescue plan" to address these findings.`;
+        return {
+          workflow: 'investigation_findings_summary',
+          toolCalls: [],
+          explanation: exp
+        };
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Context Follow-up 2: Action Fix ("same issue fix karo", "fix it")
+    // -------------------------------------------------------------
+    if (anaphora?.anaphoraType === 'ACTION_FIX') {
+      const activeP = this.memory.activeProject;
+      if (activeP) {
+        const targetBlocker = anaphora.resolvedError || this.memory.lastErrorOrBlocker;
+        const blockerText = targetBlocker?.reason || targetBlocker?.text || 'Active critical blocker';
+        const targetTaskId = targetBlocker?.taskId || 'unknown';
+
+        if (this.executionMode === 'ASK') {
+          return {
+            workflow: 'manage_blocker_plan',
+            toolCalls: [],
+            explanation: `**Advisory Recommendation (ASK Mode):**\n` +
+              `• **Project:** ${activeP.name} (\`${activeP.id}\`)\n` +
+              `• **Target Issue:** ${blockerText}\n\n` +
+              `*The assistant operates in read-only ASK mode. Switch to APPROVE or AUTOPILOT to execute this change.*`
+          };
+        }
+
+        if (this.executionMode === 'APPROVE') {
+          return {
+            workflow: 'manage_blocker_plan',
+            toolCalls: [],
+            explanation: `**Proposed Blocker Resolution (APPROVE Mode):**\n` +
+              `• **Project:** ${activeP.name} (\`${activeP.id}\`)\n` +
+              `• **Target Blocker / Issue:** ${blockerText}\n` +
+              `• **Proposed Action:** Clear blocker status and restore task \`${targetTaskId}\` to active workflow in persistence.\n\n` +
+              `*Action requires explicit confirmation: Type "approve" or select Confirm to execute this change.*`,
+            clarificationOptions: [
+              { label: `Approve fix for ${activeP.name}`, action: `approve_fix_${activeP.id}` },
+              { label: `Cancel`, action: `cancel` }
+            ]
+          };
+        }
+
+        if (this.executionMode === 'AUTOPILOT') {
+          return this._workflowManageBlocker(`resolve blocker for ${activeP.name}`);
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Error / Blocker Explanation (Multilingual)
+    // e.g. "explain this error in simple marathi", "explain error"
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'EXPLAIN_ERROR' ||
+      (normLower.includes('explain') && (normLower.includes('error') || normLower.includes('blocker') || normLower.includes('problem'))) ||
+      normLower.includes('error kyu') ||
+      normLower.includes('error ka yetoy') ||
+      normLower.includes('he kashamule')
+    ) {
+      return this._workflowExplainError(text, activeLang, anaphora);
+    }
+
+    // -------------------------------------------------------------
+    // Ambiguous Action Clarification (e.g. "fix eror in my project")
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'AMBIGUOUS_ACTION' ||
+      (normLower.startsWith('fix ') && !anaphora?.resolvedProject && !anaphora?.resolvedError)
+    ) {
+      const projectsRes = await this.mcpClient.callTool('list_projects', {});
+      const projects = projectsRes.data?.projects || [];
+      const clarificationText = this.responseEngine.formatClarificationPrompt({
+        reason: `You requested to fix an issue, but no specific project or task was identified. Which project would you like me to inspect?`,
+        options: projects.map(p => ({ label: `${p.name} (${p.category})`, action: `inspect ${p.id}` })),
+        language: activeLang
+      });
+      return {
+        workflow: 'ambiguous_action',
+        toolCalls: [{ name: 'list_projects', args: {}, result: projectsRes.data }],
+        explanation: clarificationText,
+        clarificationOptions: projects.map(p => ({ label: `${p.name} (${p.category})`, action: `inspect ${p.id}` }))
+      };
+    }
+
+    // -------------------------------------------------------------
     // Workflow 0: Autonomous Project Rescue (evaluated before investigation)
     // -------------------------------------------------------------
-    if (isRescueIntent(text)) {
+    if (isRescueIntent(text) || isRescueIntent(normalizedText) || classified.intent === 'RESCUE_PROJECT') {
       return this._workflowRescueProject(text);
     }
 
@@ -511,7 +720,10 @@ export class AssistantOrchestrator {
       lower.includes("what's my next task") ||
       lower.includes('recommendation') ||
       lower.includes('prioritize') ||
-      lower.includes('top priorit')
+      lower.includes('top priorit') ||
+      normLower.includes('daily priorit') ||
+      normLower.includes('what should i work on') ||
+      classified.intent === 'DAILY_PRIORITIES'
     ) {
       return this._workflowDailyPriorities();
     }
@@ -524,9 +736,11 @@ export class AssistantOrchestrator {
       lower.startsWith('finish task') ||
       lower.startsWith('mark task') ||
       lower.includes('complete the task') ||
-      lower.includes('mark done')
+      lower.includes('mark done') ||
+      normLower.startsWith('complete task') ||
+      classified.intent === 'COMPLETE_TASK'
     ) {
-      return this._workflowCompleteTask(text);
+      return this._workflowCompleteTask(normalizedText);
     }
 
     // -------------------------------------------------------------
@@ -538,7 +752,14 @@ export class AssistantOrchestrator {
       lower.includes("what's left") ||
       lower.includes('outstanding tasks') ||
       lower.includes('pending tasks') ||
-      lower.includes('unfinished work')
+      lower.includes('pending task') ||
+      lower.includes('unfinished work') ||
+      lower.includes('baki kam') ||
+      lower.includes('baki kaam') ||
+      lower.includes('bache hue task') ||
+      normLower.includes('remaining work') ||
+      normLower.includes('pending task') ||
+      classified.intent === 'REMAINING_WORK'
     ) {
       return this._workflowRemainingWork();
     }
@@ -550,7 +771,9 @@ export class AssistantOrchestrator {
       lower.includes('maintenance') ||
       lower.includes('overdue') ||
       lower.includes('cert') ||
-      lower.includes('rotation')
+      lower.includes('rotation') ||
+      normLower.includes('maintenance') ||
+      classified.intent === 'MAINTENANCE_REVIEW'
     ) {
       return this._workflowMaintenanceReview();
     }
@@ -558,8 +781,14 @@ export class AssistantOrchestrator {
     // -------------------------------------------------------------
     // Execution Mode Switch
     // -------------------------------------------------------------
-    if (lower.startsWith('switch to ') || lower.startsWith('set mode to ') || lower.startsWith('change mode to ')) {
-      if (lower.includes('autopilot')) {
+    if (
+      lower.startsWith('switch to ') ||
+      lower.startsWith('set mode to ') ||
+      lower.startsWith('change mode to ') ||
+      normLower.startsWith('switch to ') ||
+      classified.intent === 'SWITCH_MODE'
+    ) {
+      if (lower.includes('autopilot') || normLower.includes('autopilot')) {
         this.setExecutionMode('AUTOPILOT');
         return {
           workflow: 'mode_change',
@@ -567,7 +796,7 @@ export class AssistantOrchestrator {
           explanation: `Switched execution mode to **AUTOPILOT**. The assistant will automatically execute authorized non-destructive project operations and verify state mutations in real time.`
         };
       }
-      if (lower.includes('approve')) {
+      if (lower.includes('approve') || normLower.includes('approve')) {
         this.setExecutionMode('APPROVE');
         return {
           workflow: 'mode_change',
@@ -575,7 +804,7 @@ export class AssistantOrchestrator {
           explanation: `Switched execution mode to **APPROVE**. The assistant will prepare structured execution plans and require explicit confirmation before performing state mutations.`
         };
       }
-      if (lower.includes('ask')) {
+      if (lower.includes('ask') || normLower.includes('ask')) {
         this.setExecutionMode('ASK');
         return {
           workflow: 'mode_change',
@@ -588,15 +817,62 @@ export class AssistantOrchestrator {
     // -------------------------------------------------------------
     // Workflow: GitHub Repository Intelligence (evaluated before general investigation)
     // -------------------------------------------------------------
-    if (isGitHubInspectIntent(text)) {
+    if (isGitHubInspectIntent(text) || isGitHubInspectIntent(normalizedText) || classified.intent === 'GITHUB_INSPECT') {
       return this._workflowInspectGitHubRepo(text);
+    }
+
+    // -------------------------------------------------------------
+    // Diagnostic / General Inquiries without target (e.g. "why app not working", "majha app open hot nahi", "mera project ka status batao")
+    // -------------------------------------------------------------
+    if (
+      normLower.includes('not working') ||
+      normLower.includes('not runing') ||
+      normLower.includes('open hot nahi') ||
+      normLower.includes('slow chal raha') ||
+      normLower.includes('status batao') ||
+      normLower.includes('status sanga')
+    ) {
+      const extractedQ = extractProjectQuery(normalizedText);
+      const isDiagnosticPhrase =
+        /^(?:open\s+hot\s+nahi|not\s+working|not\s+runing|slow\s+chal\s+raha|error\s+ka\s+yetoy|kaam\s+karta\s+nahi|suru\s+hot\s+nahi)/i.test(extractedQ.trim());
+      const isTargetEmpty = !extractedQ ||
+        extractedQ === normalizedText ||
+        extractedQ === text ||
+        GENERIC_PROJECT_WORDS.has(extractedQ.toLowerCase()) ||
+        isDiagnosticPhrase ||
+        /^(?:app|project|meri|mera|majha|majhi|apna)$/i.test(extractedQ.trim());
+
+      if (isTargetEmpty && !this.memory.activeProject) {
+        const projectsRes = await this.mcpClient.callTool('list_projects', {});
+        const projects = projectsRes.data?.projects || [];
+        let promptReason = 'Please specify which project or application you would like to inspect.';
+        if (activeLang === 'mr' || activeLang === 'marathiglish') {
+          promptReason = 'तुमचे कोणते ॲप किंवा प्रोजेक्ट व्यवस्थित चालत नाही ते कृपया निवडा.';
+        } else if (activeLang === 'hi' || activeLang === 'hinglish') {
+          promptReason = 'आप किस प्रोजेक्ट या ऐप का स्टेटस और डायग्नोस्टिक्स देखना चाहते हैं?';
+        }
+        return {
+          workflow: 'ambiguous_diagnostic',
+          toolCalls: [{ name: 'list_projects', args: {}, result: projectsRes.data }],
+          explanation: this.responseEngine.formatClarificationPrompt({
+            reason: promptReason,
+            options: projects.map(p => ({ label: `${p.name} (${p.category})`, action: `inspect ${p.id}` })),
+            language: activeLang
+          }),
+          clarificationOptions: projects.map(p => ({ label: `${p.name} (${p.category})`, action: `inspect ${p.id}` }))
+        };
+      }
     }
 
     // -------------------------------------------------------------
     // Workflow 2: Project investigation
     // -------------------------------------------------------------
-    if (isProjectInvestigationIntent(text)) {
-      return this._workflowProjectInvestigation(text);
+    if (
+      isProjectInvestigationIntent(text) ||
+      isProjectInvestigationIntent(normalizedText) ||
+      classified.intent === 'INVESTIGATE_PROJECT'
+    ) {
+      return this._workflowProjectInvestigation(text, activeLang);
     }
 
     // -------------------------------------------------------------
@@ -608,7 +884,9 @@ export class AssistantOrchestrator {
       lower.startsWith('unblock task') ||
       lower.includes('resolve the checkout blocker') ||
       lower.includes('resolve the blocker') ||
-      lower.startsWith('block task')
+      lower.startsWith('block task') ||
+      normLower.startsWith('resolve blocker') ||
+      classified.intent === 'MANAGE_BLOCKER'
     ) {
       return this._workflowManageBlocker(text);
     }
@@ -616,7 +894,7 @@ export class AssistantOrchestrator {
     // -------------------------------------------------------------
     // Workflow: Reopen Task
     // -------------------------------------------------------------
-    if (lower.startsWith('reopen task') || lower.startsWith('re-open task')) {
+    if (lower.startsWith('reopen task') || lower.startsWith('re-open task') || classified.intent === 'REOPEN_TASK') {
       return this._workflowReopenTask(text);
     }
 
@@ -624,8 +902,9 @@ export class AssistantOrchestrator {
     // Workflow: Create Task
     // -------------------------------------------------------------
     if (
-      (lower.startsWith('create ') || lower.startsWith('add ')) &&
-      (lower.includes('task') || lower.includes('bug'))
+      ((lower.startsWith('create ') || lower.startsWith('add ')) &&
+        (lower.includes('task') || lower.includes('bug'))) ||
+      classified.intent === 'CREATE_TASK'
     ) {
       return this._workflowCreateTask(text);
     }
@@ -637,7 +916,8 @@ export class AssistantOrchestrator {
       lower.includes('audit log') ||
       lower.includes('audit trail') ||
       lower.includes('audit history') ||
-      lower.includes('activity history')
+      lower.includes('activity history') ||
+      classified.intent === 'AUDIT_LOG'
     ) {
       return this._workflowAuditLog();
     }
@@ -645,6 +925,30 @@ export class AssistantOrchestrator {
     // -------------------------------------------------------------
     // Fallback: Unsupported or Ambiguous request
     // -------------------------------------------------------------
+    if (activeLang === 'mr' || activeLang === 'marathiglish') {
+      return {
+        workflow: 'unsupported',
+        toolCalls: [],
+        explanation: `मी "${text}" या विनंतीचा थेट MCP कार्यप्रवाहाशी मेळ घालू शकलो नाही.\n` +
+          `तुम्ही मला खालीलपैकी विचारू शकता:\n` +
+          `1. "Show daily priorities" (दैनंदिन प्राधान्यक्रम)\n` +
+          `2. "Investigate project <Name>" (प्रोजेक्ट तपासणी)\n` +
+          `3. "Show remaining work" (प्रलंबित कामे)\n` +
+          `4. "Review maintenance tasks" (देखभाल कामे)`
+      };
+    }
+    if (activeLang === 'hi' || activeLang === 'hinglish') {
+      return {
+        workflow: 'unsupported',
+        toolCalls: [],
+        explanation: `मैं "${text}" को किसी सीधे MCP वर्कफ़्लो से मैप नहीं कर सका।\n` +
+          `आप मुझसे पूछ सकते हैं:\n` +
+          `1. "Show daily priorities" (दैनिक प्राथमिकताएं)\n` +
+          `2. "Investigate project <Name>" (प्रोजेक्ट जाँच)\n` +
+          `3. "Show remaining work" (पेंडिंग काम)\n` +
+          `4. "Review maintenance tasks" (रखरखाव समीक्षा)`
+      };
+    }
     return {
       workflow: 'unsupported',
       toolCalls: [],
@@ -708,7 +1012,7 @@ You can ask me to:
     };
   }
 
-  async _workflowProjectInvestigation(rawText) {
+  async _workflowProjectInvestigation(rawText, preferredLang = null) {
     const toolCalls = [];
 
     // Step 1: Always retrieve live projects from the real MCP tool
@@ -720,11 +1024,44 @@ You can ask me to:
     });
 
     const projects = projectsRes.data?.projects || [];
+    const langInfo = this.languageDetector.detect(rawText);
+    const lang = preferredLang || (langInfo.language !== 'en' ? langInfo.language : this.memory.preferredLanguage) || 'en';
 
     // Resolve project using the multi-tier deterministic matching engine
-    const resolution = resolveProject(rawText, projects);
+    let resolution = resolveProject(rawText, projects);
+
+    // If query is empty or couldn't resolve from text, check if an explicit anaphoric reference was made
+    const anaphora = this.memory.resolveAnaphora(rawText);
+    if (resolution.status === 'empty' && anaphora?.anaphoraType === 'PROJECT_REF' && anaphora?.resolvedProject) {
+      const memMatch = projects.find(p => p.id === anaphora.resolvedProject.id);
+      if (memMatch) {
+        resolution = { status: 'matched', project: memMatch, matchedBy: 'context_memory' };
+      }
+    }
 
     if (resolution.status === 'empty') {
+      if (lang === 'mr' || lang === 'marathiglish') {
+        const projectListStr = projects.length > 0
+          ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
+          : 'कोणतेही प्रोजेक्ट्स उपलब्ध नाहीत.';
+        return {
+          workflow: 'project_investigation',
+          toolCalls,
+          explanation: `कृपया तपासणीसाठी प्रोजेक्टचे नाव सांगा.\n\nउपलब्ध प्रोजेक्ट्स:\n${projectListStr}`,
+          clarificationOptions: projects.map(p => ({ label: `${p.name} (${p.category})`, action: p.id }))
+        };
+      }
+      if (lang === 'hi' || lang === 'hinglish') {
+        const projectListStr = projects.length > 0
+          ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
+          : 'कोई प्रोजेक्ट उपलब्ध नहीं है।';
+        return {
+          workflow: 'project_investigation',
+          toolCalls,
+          explanation: `कृपया जाँच के लिए प्रोजेक्ट का नाम बताएं।\n\nउपलब्ध प्रोजेक्ट्स:\n${projectListStr}`,
+          clarificationOptions: projects.map(p => ({ label: `${p.name} (${p.category})`, action: p.id }))
+        };
+      }
       const projectListStr = projects.length > 0
         ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
         : 'No projects currently registered.';
@@ -801,6 +1138,47 @@ You can ask me to:
     const evidence = health?.evidence || {};
     const completeness = evidence.dataCompleteness || { percentage: 0, rating: 'Unknown', missingFields: [], summary: 'N/A' };
 
+    // Record investigation in conversational memory
+    this.memory.recordInvestigation({
+      project: targetProject,
+      details: p,
+      health,
+      blockers
+    });
+
+    // Multilingual response if Hindi or Marathi is active
+    if (lang === 'mr' || lang === 'marathiglish') {
+      const marathiSummary = this.responseEngine.formatInvestigationReport({
+        project: p,
+        details: p,
+        health,
+        blockers,
+        tasks: detailsRes.data?.tasks || [],
+        language: 'mr'
+      });
+      return {
+        workflow: 'project_investigation',
+        toolCalls,
+        explanation: marathiSummary
+      };
+    }
+
+    if (lang === 'hi' || lang === 'hinglish') {
+      const hindiSummary = this.responseEngine.formatInvestigationReport({
+        project: p,
+        details: p,
+        health,
+        blockers,
+        tasks: detailsRes.data?.tasks || [],
+        language: 'hi'
+      });
+      return {
+        workflow: 'project_investigation',
+        toolCalls,
+        explanation: hindiSummary
+      };
+    }
+
     let explanation = `### Project Health & Intelligence Report: ${p.name} (${p.category || 'General'})\n`;
     explanation += `• **Project ID:** \`${p.id}\`\n\n`;
 
@@ -859,6 +1237,71 @@ You can ask me to:
 
     return {
       workflow: 'project_investigation',
+      toolCalls,
+      explanation
+    };
+  }
+
+  async _workflowExplainError(rawText, language = 'en', anaphora = null) {
+    const toolCalls = [];
+
+    let targetProject = anaphora?.resolvedProject || this.memory.activeProject;
+    let targetError = anaphora?.resolvedError || this.memory.lastErrorOrBlocker;
+
+    if (!targetError || !targetProject) {
+      const projectsRes = await this.mcpClient.callTool('list_projects', {});
+      toolCalls.push({
+        name: 'list_projects',
+        args: {},
+        result: projectsRes.data
+      });
+      const projects = projectsRes.data?.projects || [];
+
+      for (const p of projects) {
+        try {
+          const detailsRes = await this.mcpClient.callTool('get_project_details', { projectId: p.id });
+          toolCalls.push({
+            name: 'get_project_details',
+            args: { projectId: p.id },
+            result: detailsRes.data
+          });
+          const blockers = detailsRes.data?.blockers || [];
+          if (blockers.length > 0) {
+            targetProject = p;
+            targetError = {
+              text: blockers[0].blockerReason || blockers[0].blocker,
+              reason: blockers[0].blockerReason || blockers[0].blocker,
+              taskId: blockers[0].id || blockers[0].taskId,
+              taskTitle: blockers[0].taskTitle || blockers[0].title
+            };
+            this.memory.recordInvestigation({ project: p, details: detailsRes.data?.project, health: detailsRes.data?.health, blockers });
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!targetProject || !targetError) {
+      const msg = language === 'mr' || language === 'marathiglish'
+        ? 'सध्या कोणत्याही प्रोजेक्टमध्ये सक्रिय एरर किंवा ब्लॉकर आढळला नाही. तपासणीसाठी कृपया प्रोजेक्टचे नाव सांगा.'
+        : (language === 'hi' || language === 'hinglish'
+          ? 'वर्तमान में किसी भी प्रोजेक्ट में सक्रिय एरर या ब्लॉकर नहीं मिला है। विवरण के लिए कृपया प्रोजेक्ट का नाम बताएं।'
+          : 'No active error or blocker was found in your registered projects. Please specify a project name to inspect.');
+      return {
+        workflow: 'explain_error',
+        toolCalls,
+        explanation: msg
+      };
+    }
+
+    const explanation = this.responseEngine.formatErrorExplanation({
+      project: targetProject,
+      errorOrBlocker: targetError,
+      language
+    });
+
+    return {
+      workflow: 'explain_error',
       toolCalls,
       explanation
     };
