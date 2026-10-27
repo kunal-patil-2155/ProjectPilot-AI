@@ -474,6 +474,17 @@
                 <button type="button" class="mode-btn active" data-mode="APPROVE" title="Requires explicit human approval before mutating state">APPROVE</button>
                 <button type="button" class="mode-btn" data-mode="AUTOPILOT" title="Directly executes authorized operations with real-time verification">AUTOPILOT</button>
               </div>
+              <div class="voice-controls-group" role="group" aria-label="Speech Voice and Speed Settings">
+                <select id="voiceSelector" class="select-field input-sm voice-select-control" aria-label="Select speech voice" title="Speech Voice">
+                  <option value="">Voice: Auto (Language Matched)</option>
+                </select>
+                <select id="speedSelector" class="select-field input-sm speed-select-control" aria-label="Select reading speed" title="Reading Speed">
+                  <option value="0.80">0.80x (Slow)</option>
+                  <option value="0.95" selected>0.95x (Calm)</option>
+                  <option value="1.05">1.05x (Normal)</option>
+                  <option value="1.20">1.20x (Brisk)</option>
+                </select>
+              </div>
               <button id="toggleVoiceBtn" class="btn btn-secondary btn-sm" title="Toggle audio voice response simulation">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
                 <span id="voiceToggleLabel">Voice: Enabled</span>
@@ -526,9 +537,38 @@
               </div>
             </div>
 
+            <!-- Global Read Aloud Player Bar (READ ALOUD 2.0) -->
+            <div id="readAloudPlayerBar" class="read-aloud-player-bar hidden" role="region" aria-label="Audio playback controls" aria-live="polite">
+              <div class="player-left">
+                <div class="audio-wave-icon" aria-hidden="true">
+                  <span class="bar bar-1"></span>
+                  <span class="bar bar-2"></span>
+                  <span class="bar bar-3"></span>
+                </div>
+                <div class="player-info">
+                  <div class="player-title" id="readAloudStatusText">Reading response...</div>
+                  <div class="player-meta">
+                    <span id="readAloudProgressBadge" class="read-aloud-badge">Chunk 1 of 1 (100%)</span>
+                    <span id="readAloudVoiceBadge" class="read-aloud-voice-tag">Voice: Natural</span>
+                  </div>
+                </div>
+              </div>
+              <div class="player-actions">
+                <button type="button" id="playerPauseResumeBtn" class="btn btn-secondary btn-xs" aria-label="Pause speech" title="Pause reading">
+                  <span class="btn-icon">⏸</span> <span class="btn-text">Pause</span>
+                </button>
+                <button type="button" id="playerStopBtn" class="btn btn-secondary btn-xs" aria-label="Stop speech" title="Stop reading">
+                  <span class="btn-icon">⏹</span> <span class="btn-text">Stop</span>
+                </button>
+                <button type="button" id="playerRestartBtn" class="btn btn-secondary btn-xs" aria-label="Restart speech from beginning" title="Restart reading">
+                  <span class="btn-icon">🔄</span> <span class="btn-text">Restart</span>
+                </button>
+              </div>
+            </div>
+
             <!-- Chat Stream -->
             <div id="chatMessageStream" class="chat-message-stream" role="log" aria-live="polite">
-              <div class="chat-msg msg-assistant">
+              <div class="chat-msg msg-assistant" data-message-id="welcome-msg">
                 <div class="msg-avatar">AI</div>
                 <div class="msg-body">
                   <div class="msg-sender">ProjectPilot Assistant</div>
@@ -542,6 +582,20 @@
                       <li><em>"Show remaining work"</em> (Outstanding tasks workflow)</li>
                       <li><em>"Review maintenance tasks"</em> (Maintenance tracking workflow)</li>
                     </ul>
+                  </div>
+                  <div class="msg-audio-actions">
+                    <button type="button" class="btn-read-aloud" data-action="read" aria-label="Read this message aloud" title="Read Aloud">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                      <span>Read Aloud</span>
+                    </button>
+                    <div class="msg-audio-live-controls hidden">
+                      <span class="msg-reading-indicator">
+                        <span class="pulse-dot"></span> <span class="chunk-counter">Reading...</span>
+                      </span>
+                      <button type="button" class="btn-audio-mini btn-pause" aria-label="Pause speech" title="Pause">⏸</button>
+                      <button type="button" class="btn-audio-mini btn-stop" aria-label="Stop speech" title="Stop">⏹</button>
+                      <button type="button" class="btn-audio-mini btn-restart" aria-label="Restart speech" title="Restart">🔄</button>
+                    </div>
                   </div>
                 </div>
               </div>

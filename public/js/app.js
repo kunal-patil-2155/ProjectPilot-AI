@@ -6,11 +6,13 @@
 
 import { McpBrowserClient } from './api/mcpClient.js';
 import { AssistantOrchestrator } from './orchestrator.js';
+import { ReadAloudEngine } from './speech/readAloudEngine.js';
 
 // Application State
 const state = {
   mcpClient: null,
   orchestrator: null,
+  readAloudEngine: null,
   activeView: 'dashboard',
   projects: [],
   tasks: [],
@@ -33,6 +35,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupInspector();
   setupGitHubAuditView();
   setupAuditLogView();
+
+  // Initialize READ ALOUD 2.0 Engine
+  state.readAloudEngine = new ReadAloudEngine();
+  if (typeof window !== 'undefined') {
+    window.readAloudEngine = state.readAloudEngine;
+  }
+  setupReadAloudControls();
 
   // Initialize MCP client strictly in memory (no persistent credentials in localStorage, sessionStorage, or cookies)
   state.mcpClient = new McpBrowserClient('/mcp');
@@ -1105,6 +1114,9 @@ function setupAssistantChat() {
   if (toggleVoice) {
     toggleVoice.addEventListener('click', () => {
       state.voiceEnabled = !state.voiceEnabled;
+      if (state.readAloudEngine) {
+        state.readAloudEngine.setAutoPlay(state.voiceEnabled);
+      }
       document.getElementById('voiceToggleLabel').textContent = `Voice: ${state.voiceEnabled ? 'Enabled' : 'Muted'}`;
       showToast(`Voice synthesis ${state.voiceEnabled ? 'enabled' : 'muted'}`, 'info');
     });
@@ -1173,6 +1185,9 @@ async function executeAssistantPrompt(promptText) {
       }
 
       const rescueCardHtml = outcome.cardHtml || '';
+      const msgId = `asst-msg-${Date.now()}`;
+      msgEl.dataset.messageId = msgId;
+      const audioBarHtml = renderMessageAudioBar(outcome.explanation, msgId);
 
       msgEl.innerHTML = `
         <div class="msg-sender">ProjectPilot Assistant</div>
@@ -1182,7 +1197,10 @@ async function executeAssistantPrompt(promptText) {
           ${toolInvocationsHtml}
           ${clarificationButtons}
         </div>
+        ${audioBarHtml}
       `;
+
+      wireMessageAudioBar(msgEl.querySelector('.msg-audio-actions'), outcome.explanation, msgId);
 
       if (outcome.cardHtml) {
         setupRescueCardListeners(msgEl.querySelector('.rescue-plan-card'));
@@ -1199,9 +1217,9 @@ async function executeAssistantPrompt(promptText) {
       dashSnippet.textContent = outcome.explanation.slice(0, 300) + (outcome.explanation.length > 300 ? '...' : '');
     }
 
-    // Voice simulation
-    if (state.voiceEnabled && 'speechSynthesis' in window) {
-      speakAssistantResponse(outcome.explanation);
+    // Voice simulation (READ ALOUD 2.0)
+    if (state.voiceEnabled && (state.readAloudEngine || 'speechSynthesis' in window)) {
+      speakAssistantResponse(outcome.explanation, { messageId: msgEl ? msgEl.dataset.messageId : null });
     }
 
     // Refresh UI data to reflect any state changes made by tools
@@ -1360,12 +1378,79 @@ function setupRescueCardListeners(card) {
   }
 }
 
+function renderMessageAudioBar(text, messageId) {
+  return `
+    <div class="msg-audio-actions" data-message-id="${messageId}">
+      <button type="button" class="btn-read-aloud" data-action="read" aria-label="Read this message aloud" title="Read Aloud">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+        <span>Read Aloud</span>
+      </button>
+      <div class="msg-audio-live-controls hidden">
+        <span class="msg-reading-indicator">
+          <span class="pulse-dot"></span> <span class="chunk-counter">Reading...</span>
+        </span>
+        <button type="button" class="btn-audio-mini btn-pause" aria-label="Pause speech" title="Pause">⏸</button>
+        <button type="button" class="btn-audio-mini btn-stop" aria-label="Stop speech" title="Stop">⏹</button>
+        <button type="button" class="btn-audio-mini btn-restart" aria-label="Restart speech" title="Restart">🔄</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireMessageAudioBar(container, rawText, messageId) {
+  if (!container || container.dataset.wired) return;
+  container.dataset.wired = 'true';
+  const readBtn = container.querySelector('.btn-read-aloud');
+  const pauseBtn = container.querySelector('.btn-pause');
+  const stopBtn = container.querySelector('.btn-stop');
+  const restartBtn = container.querySelector('.btn-restart');
+
+  if (readBtn) {
+    readBtn.addEventListener('click', () => {
+      if (state.readAloudEngine) {
+        state.readAloudEngine.speak(rawText, { messageId });
+      }
+    });
+  }
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', () => {
+      if (state.readAloudEngine) {
+        if (state.readAloudEngine.status === 'playing') {
+          state.readAloudEngine.pause();
+        } else {
+          state.readAloudEngine.resume();
+        }
+      }
+    });
+  }
+  if (stopBtn) {
+    stopBtn.addEventListener('click', () => {
+      if (state.readAloudEngine) {
+        state.readAloudEngine.stop();
+      }
+    });
+  }
+  if (restartBtn) {
+    restartBtn.addEventListener('click', () => {
+      if (state.readAloudEngine) {
+        state.readAloudEngine.restart();
+      }
+    });
+  }
+}
+
 function appendChatMessage(type, sender, text, elementId = null, cardHtml = null) {
   const stream = document.getElementById('chatMessageStream');
   if (!stream) return;
 
   const msgDiv = document.createElement('div');
   msgDiv.className = `chat-msg msg-${type}`;
+  const msgId = elementId || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  msgDiv.dataset.messageId = msgId;
+
+  const isAssistant = type === 'assistant';
+  const isPlaceholder = elementId && elementId.startsWith('ai-thinking-');
+  const audioBarHtml = isAssistant && !isPlaceholder ? renderMessageAudioBar(text, msgId) : '';
 
   msgDiv.innerHTML = `
     <div class="msg-avatar">${type === 'user' ? 'DEV' : 'AI'}</div>
@@ -1375,24 +1460,201 @@ function appendChatMessage(type, sender, text, elementId = null, cardHtml = null
         ${formatMarkdown(text)}
         ${cardHtml || ''}
       </div>
+      ${audioBarHtml}
     </div>
   `;
 
   stream.appendChild(msgDiv);
   stream.scrollTop = stream.scrollHeight;
+
+  if (isAssistant && !isPlaceholder) {
+    wireMessageAudioBar(msgDiv.querySelector('.msg-audio-actions'), text, msgId);
+  }
 }
 
-function speakAssistantResponse(text) {
+function speakAssistantResponse(text, options = {}) {
   try {
-    window.speechSynthesis.cancel();
-    // Clean text of markdown chars
-    const plain = text.replace(/[*#_`>]/g, '').slice(0, 200);
-    const utterance = new SpeechSynthesisUtterance(plain);
-    utterance.rate = 1.05;
-    window.speechSynthesis.speak(utterance);
+    if (state.readAloudEngine) {
+      return state.readAloudEngine.speak(text, options);
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const plain = text.replace(/[*#_`>]/g, '');
+      const utterance = new SpeechSynthesisUtterance(plain);
+      utterance.rate = 0.95;
+      window.speechSynthesis.speak(utterance);
+    }
   } catch (err) {
     console.warn('Speech synthesis unavailable:', err);
   }
+}
+
+function setupReadAloudControls() {
+  const engine = state.readAloudEngine;
+  if (!engine) return;
+
+  const voiceSelect = document.getElementById('voiceSelector');
+  const speedSelect = document.getElementById('speedSelector');
+  const playerBar = document.getElementById('readAloudPlayerBar');
+  const playerStatusText = document.getElementById('readAloudStatusText');
+  const playerProgressBadge = document.getElementById('readAloudProgressBadge');
+  const playerVoiceBadge = document.getElementById('readAloudVoiceBadge');
+  const playerPauseResumeBtn = document.getElementById('playerPauseResumeBtn');
+  const playerStopBtn = document.getElementById('playerStopBtn');
+  const playerRestartBtn = document.getElementById('playerRestartBtn');
+
+  // Populate voice selector dropdown
+  function populateVoiceDropdown() {
+    if (!voiceSelect) return;
+    const voices = engine.getVoices();
+    voiceSelect.innerHTML = '<option value="">Voice: Auto (Language Matched)</option>';
+    voices.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.voiceURI;
+      opt.textContent = `${v.name} (${v.lang})`;
+      if (engine.preferredVoiceUri === v.voiceURI) {
+        opt.selected = true;
+      }
+      voiceSelect.appendChild(opt);
+    });
+  }
+
+  populateVoiceDropdown();
+  if (engine.synth) {
+    if (typeof engine.synth.addEventListener === 'function') {
+      engine.synth.addEventListener('voiceschanged', populateVoiceDropdown);
+    } else if ('onvoiceschanged' in engine.synth) {
+      engine.synth.onvoiceschanged = populateVoiceDropdown;
+    }
+  }
+
+  if (voiceSelect) {
+    voiceSelect.addEventListener('change', () => {
+      engine.setVoice(voiceSelect.value || null);
+      showToast('Voice preference updated', 'info');
+    });
+  }
+
+  if (speedSelect) {
+    speedSelect.value = engine.rate.toFixed(2);
+    speedSelect.addEventListener('change', () => {
+      const newRate = parseFloat(speedSelect.value) || 0.95;
+      engine.setRate(newRate);
+      showToast(`Reading speed set to ${newRate.toFixed(2)}x`, 'info');
+    });
+  }
+
+  // Global Player Bar Controls
+  if (playerPauseResumeBtn) {
+    playerPauseResumeBtn.addEventListener('click', () => {
+      if (engine.status === 'playing') {
+        engine.pause();
+      } else if (engine.status === 'paused') {
+        engine.resume();
+      }
+    });
+  }
+
+  if (playerStopBtn) {
+    playerStopBtn.addEventListener('click', () => {
+      engine.stop();
+    });
+  }
+
+  if (playerRestartBtn) {
+    playerRestartBtn.addEventListener('click', () => {
+      engine.restart();
+    });
+  }
+
+  // Hook into ReadAloudEngine state events
+  engine.onStateChange(({ status, messageId }) => {
+    // 1. Update Global Player Bar
+    if (playerBar) {
+      if (status === 'playing' || status === 'paused') {
+        playerBar.classList.remove('hidden');
+        if (status === 'paused') {
+          playerBar.classList.add('player-paused');
+          if (playerPauseResumeBtn) {
+            playerPauseResumeBtn.innerHTML = '<span class="btn-icon">▶</span> <span class="btn-text">Resume</span>';
+            playerPauseResumeBtn.setAttribute('aria-label', 'Resume speech');
+          }
+          if (playerStatusText) playerStatusText.textContent = 'Paused';
+        } else {
+          playerBar.classList.remove('player-paused');
+          if (playerPauseResumeBtn) {
+            playerPauseResumeBtn.innerHTML = '<span class="btn-icon">⏸</span> <span class="btn-text">Pause</span>';
+            playerPauseResumeBtn.setAttribute('aria-label', 'Pause speech');
+          }
+          if (playerStatusText) playerStatusText.textContent = 'Reading response...';
+        }
+      } else {
+        playerBar.classList.add('hidden');
+      }
+    }
+
+    // 2. Update Message-level Audio Controls
+    document.querySelectorAll('.msg-audio-actions').forEach(bar => {
+      const barMsgId = bar.dataset.messageId;
+      const readBtn = bar.querySelector('.btn-read-aloud');
+      const liveControls = bar.querySelector('.msg-audio-live-controls');
+      const miniPause = bar.querySelector('.btn-pause');
+
+      if (status === 'playing' || status === 'paused') {
+        if (barMsgId === messageId) {
+          if (readBtn) readBtn.classList.add('hidden');
+          if (liveControls) liveControls.classList.remove('hidden');
+          if (miniPause) miniPause.textContent = status === 'paused' ? '▶' : '⏸';
+        } else {
+          if (readBtn) readBtn.classList.remove('hidden');
+          if (liveControls) liveControls.classList.add('hidden');
+        }
+      } else {
+        // Stopped or completed
+        if (readBtn) readBtn.classList.remove('hidden');
+        if (liveControls) liveControls.classList.add('hidden');
+      }
+    });
+  });
+
+  engine.onProgress(({ currentIndex, totalChunks, percentage, messageId }) => {
+    if (playerProgressBadge) {
+      playerProgressBadge.textContent = `Chunk ${currentIndex + 1} of ${totalChunks} (${percentage}%)`;
+    }
+    if (playerVoiceBadge) {
+      const activeVoice = engine.currentUtterance?.voice?.name || 'Natural';
+      playerVoiceBadge.textContent = `Voice: ${activeVoice}`;
+    }
+
+    if (messageId) {
+      const activeBar = document.querySelector(`.msg-audio-actions[data-message-id="${messageId}"]`);
+      if (activeBar) {
+        const counter = activeBar.querySelector('.chunk-counter');
+        if (counter) counter.textContent = `Chunk ${currentIndex + 1} of ${totalChunks}`;
+      }
+    }
+  });
+
+  engine.onComplete(() => {
+    showToast('Read Aloud completed', 'info');
+  });
+
+  engine.onError((err) => {
+    if (playerBar) playerBar.classList.add('hidden');
+    showToast(err.message || 'Speech synthesis error', 'error');
+  });
+
+  // Wire initial welcome message audio actions
+  const welcomeMsg = document.querySelector('.chat-msg[data-message-id="welcome-msg"]');
+  if (welcomeMsg) {
+    const rawText = welcomeMsg.querySelector('.msg-text')?.innerText || '';
+    wireMessageAudioBar(welcomeMsg.querySelector('.msg-audio-actions'), rawText, 'welcome-msg');
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.speakAssistantResponse = speakAssistantResponse;
+  window.setupReadAloudControls = setupReadAloudControls;
 }
 
 // ==========================================================================
