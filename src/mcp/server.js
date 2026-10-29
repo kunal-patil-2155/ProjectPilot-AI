@@ -496,35 +496,35 @@ export function createProjectPilotMcpServer(store, options = {}) {
     }
   );
 
+  // 13. inspect_github_repo (Standard read-only repository intelligence tool)
+  server.tool(
+    'inspect_github_repo',
+    'Inspect a GitHub repository URL for structure, dependencies, CI/CD, and security findings.',
+    {
+      repoUrl: z.string().min(1).describe('Valid GitHub repository URL (https://github.com/owner/repo)'),
+      branch: z.string().optional().describe('Optional branch to inspect')
+    },
+    async (args) => {
+      try {
+        const report = await githubService.inspectRepository(args.repoUrl, { branch: args.branch });
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(report, null, 2)
+          }]
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Failed to inspect repository: ${err.message}` }]
+        };
+      }
+    }
+  );
+
   // Extend with advanced project operations tools (Groups A-G) when extended mode is enabled
   const enableExtended = options.enableExtended === true || process.env.PROJECTPILOT_EXTENDED_TOOLS === 'true';
   if (enableExtended) {
-    // 13. inspect_github_repo
-    server.tool(
-      'inspect_github_repo',
-      'Inspect a GitHub repository URL for structure, dependencies, CI/CD, and security findings.',
-      {
-        repoUrl: z.string().min(1).describe('Valid GitHub repository URL (https://github.com/owner/repo)'),
-        branch: z.string().optional().describe('Optional branch to inspect')
-      },
-      async (args) => {
-        try {
-          const report = await githubService.inspectRepository(args.repoUrl, { branch: args.branch });
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify(report, null, 2)
-            }]
-          };
-        } catch (err) {
-          return {
-            isError: true,
-            content: [{ type: 'text', text: `Failed to inspect repository: ${err.message}` }]
-          };
-        }
-      }
-    );
-
     // 14. delete_project
     server.tool(
       'delete_project',

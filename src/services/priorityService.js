@@ -104,7 +104,10 @@ export class PriorityService {
       let executionReadiness = 'Ready';
       if (task.status === 'blocked' || task.blocker) {
         executionReadiness = 'Blocked — Unblocking Required';
-        // Blockers require immediate attention to unblock, but cannot be completed directly
+        // Blockers require immediate attention to unblock, but cannot be completed directly;
+        // apply a 20-point penalty so executable tasks rightfully take priority
+        score -= 20;
+        reasons.push('Active blocker penalty (-20 pts)');
         reasons.push(`Blocked: "${task.blocker || 'Recorded as blocked'}"`);
       } else if (task.status === 'in_progress') {
         score += 8;
@@ -127,15 +130,32 @@ export class PriorityService {
       };
     });
 
-    // Sort descending by score
-    scoredTasks.sort((a, b) => b.score - a.score);
+    // Sort: 1. Score (descending), 2. Due Date (earliest first), 3. Task ID (stable ascending)
+    scoredTasks.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      const timeA = a.dueDate ? new Date(a.dueDate).getTime() : NaN;
+      const timeB = b.dueDate ? new Date(b.dueDate).getTime() : NaN;
+      const validA = !Number.isNaN(timeA);
+      const validB = !Number.isNaN(timeB);
+
+      if (validA && validB) {
+        if (timeA !== timeB) return timeA - timeB;
+      } else if (validA && !validB) {
+        return -1;
+      } else if (!validA && validB) {
+        return 1;
+      }
+      return String(a.taskId).localeCompare(String(b.taskId));
+    });
 
     const recommendations = scoredTasks.slice(0, limit);
 
     return {
       evaluatedTaskCount: tasks.length,
       recommendationCount: recommendations.length,
-      methodology: 'Deterministic scoring: priority tier + due date proximity + bug urgency + project status - blockers.',
+      methodology: 'Deterministic scoring: priority tier + due date proximity + bug urgency + project status - blockers (tie-breakers: due date, task ID).',
       recommendations
     };
   }

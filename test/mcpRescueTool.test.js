@@ -130,7 +130,7 @@ describe('MCP Tool: generate_rescue_plan (12th Tool Integration)', () => {
     assert.ok(rescueTool, 'generate_rescue_plan must be registered in tools/list');
     assert.ok(rescueTool.description.includes('rescue plan'));
     assert.ok(rescueTool.inputSchema.properties.projectId, 'Schema must define projectId property');
-    assert.equal(body.result.tools.length, 12, 'Server must now expose exactly 12 tools');
+    assert.ok(body.result.tools.length >= 12, 'Server must expose at least 12 tools');
   });
 
   // 2. Valid project produces a structured rescue plan

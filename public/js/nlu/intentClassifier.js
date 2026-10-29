@@ -12,11 +12,17 @@ export const INTENTS = {
   REOPEN_TASK: 'REOPEN_TASK',
   CREATE_TASK: 'CREATE_TASK',
   MANAGE_BLOCKER: 'MANAGE_BLOCKER',
+  LIST_BLOCKERS: 'LIST_BLOCKERS',
+  OVERDUE_TASKS: 'OVERDUE_TASKS',
   MAINTENANCE_REVIEW: 'MAINTENANCE_REVIEW',
   RESCUE_PROJECT: 'RESCUE_PROJECT',
   GITHUB_INSPECT: 'GITHUB_INSPECT',
   EXPLAIN_ERROR: 'EXPLAIN_ERROR',
+  EXPLAIN_CONCEPT: 'EXPLAIN_CONCEPT',
+  EXPLAIN_FORMULA: 'EXPLAIN_FORMULA',
+  FIND_TASK: 'FIND_TASK',
   AUDIT_LOG: 'AUDIT_LOG',
+  SWITCH_LANGUAGE: 'SWITCH_LANGUAGE',
   SWITCH_MODE: 'SWITCH_MODE',
   GREETING: 'GREETING',
   AMBIGUOUS_ACTION: 'AMBIGUOUS_ACTION',
@@ -63,7 +69,24 @@ export class IntentClassifier {
     // 0. Check Context Memory Anaphora
     const anaphora = this.memory ? this.memory.resolveAnaphora(normalizedText) : null;
 
-    // 1. Mode Switch Intent
+    // 1. Language Switch Intent
+    if (
+      langInfo?.isSwitchCommand ||
+      /\b(?:switch\s+(?:to\s+)?|change\s+(?:language\s+)?to\s+|speak\s+in\s+)(?:english|marathi|hindi|hinglish)\b/i.test(lower) ||
+      /^(?:in\s+english|in\s+marathi|in\s+hindi|in\s+hinglish)$/i.test(lower)
+    ) {
+      const targetLanguage = langInfo?.requestedLanguage || (lower.includes('marathi') ? 'mr' : (lower.includes('hindi') ? 'hi' : 'en'));
+      return {
+        intent: INTENTS.SWITCH_LANGUAGE,
+        targetProject: null,
+        targetTask: null,
+        targetRepo: null,
+        targetLanguage,
+        confidence: 0.99
+      };
+    }
+
+    // 2. Mode Switch Intent
     if (lower.startsWith('switch to ') || lower.startsWith('set mode to ') || lower.startsWith('change mode to ')) {
       return {
         intent: INTENTS.SWITCH_MODE,
@@ -77,10 +100,26 @@ export class IntentClassifier {
       };
     }
 
-    // 2. Greeting Intent
+    // 2. Greeting & Identity / Capabilities Intent
     if (
-      /^(?:hi|hello|hey|namaste|namaskar|good\s+morning|good\s+evening|pranam|kasa\s+kay|kaise\s+ho)\b/i.test(lower) &&
-      lower.split(/\s+/).length <= 3
+      /^(?:hi|hello|hey|namaste|namaskar|good\s+morning|good\s+evening|pranam|kasa\s+kay|kaise\s+ho)\b/i.test(lower) ||
+      lower.includes('who are you') ||
+      lower.includes('who r u') ||
+      lower.includes('introduce yourself') ||
+      lower.includes('tell me about yourself') ||
+      lower.includes('what can you do') ||
+      lower.includes('what are your capabilities') ||
+      lower.includes('what do you do') ||
+      lower.includes('how can you help') ||
+      lower.includes('your capabilities') ||
+      lower.includes('kon ahes') ||
+      lower.includes('kon ahat') ||
+      lower.includes('olakh dya') ||
+      lower.includes('kaun ho') ||
+      lower.includes('kaun hain') ||
+      lower.includes('parichay do') ||
+      lower.includes('kya kar sakte ho') ||
+      lower.includes('kay karu shaktas')
     ) {
       return {
         intent: INTENTS.GREETING,
@@ -200,6 +239,89 @@ export class IntentClassifier {
         actionType: 'inspect_github_repo',
         requiresClarification: !match && !lower.includes('github.com'),
         clarificationReason: (!match && !lower.includes('github.com')) ? 'Please provide the GitHub repository URL to inspect.' : null,
+        confidence: 0.93
+      };
+    }
+
+    // 7.1 Explain Priority Formula Intent (evaluated BEFORE Daily Priorities)
+    if (
+      lower.includes('priority formula') ||
+      lower.includes('scoring formula') ||
+      lower.includes('priority scoring formula') ||
+      lower.includes('daily-priority scoring formula') ||
+      lower.includes('daily priority scoring formula') ||
+      lower.includes('explain the daily-priority') ||
+      lower.includes('explain daily-priority') ||
+      lower.includes('explain priority scoring') ||
+      lower.includes('how is priority calculated') ||
+      lower.includes('how do you calculate priority') ||
+      lower.includes('priority calculation') ||
+      lower.includes('priority sutra') ||
+      lower.includes('formula sanga') ||
+      lower.includes('formula batao')
+    ) {
+      return {
+        intent: INTENTS.EXPLAIN_FORMULA,
+        targetProject: null,
+        targetTask: null,
+        targetRepo: null,
+        actionType: 'explain_formula',
+        requiresClarification: false,
+        clarificationReason: null,
+        confidence: 0.96
+      };
+    }
+
+    // 7.2 Explain Concept Intent (MCP, Streamable HTTP, Architecture)
+    if (
+      lower.includes('explain mcp') ||
+      lower.includes('what is mcp') ||
+      lower.includes('what is model context protocol') ||
+      lower.includes('explain model context protocol') ||
+      lower.includes('explain streamable http') ||
+      lower.includes('what is streamable http') ||
+      lower.includes('explain projectpilot architecture') ||
+      lower.includes('explain the architecture') ||
+      lower.includes('explain architecture') ||
+      lower.includes('mcp kay aahe') ||
+      lower.includes('mcp kya hai') ||
+      lower.includes('streamable http kay aahe') ||
+      lower.includes('streamable http kya hai')
+    ) {
+      let concept = 'mcp';
+      if (lower.includes('streamable http')) concept = 'streamable_http';
+      else if (lower.includes('architecture')) concept = 'architecture';
+
+      return {
+        intent: INTENTS.EXPLAIN_CONCEPT,
+        targetProject: null,
+        targetTask: null,
+        targetRepo: null,
+        actionType: 'explain_concept',
+        concept,
+        requiresClarification: false,
+        clarificationReason: null,
+        confidence: 0.96
+      };
+    }
+
+    // 7.3 Find Task Intent (Title / ID Lookup)
+    if (
+      lower.startsWith('find task') ||
+      lower.startsWith('search task') ||
+      lower.startsWith('find a task') ||
+      lower.startsWith('locate task') ||
+      lower.includes('task shodha') ||
+      lower.includes('task khojo')
+    ) {
+      return {
+        intent: INTENTS.FIND_TASK,
+        targetProject: null,
+        targetTask: this._extractTaskSearchQuery(lower),
+        targetRepo: null,
+        actionType: 'find_task',
+        requiresClarification: false,
+        clarificationReason: null,
         confidence: 0.93
       };
     }
@@ -340,12 +462,97 @@ export class IntentClassifier {
       };
     }
 
-    // 14. Maintenance Review Intent
+    // 14. Cross-Project Blocked Tasks Intent (Evaluated before general investigation)
+    if (
+      !lower.startsWith('resolve blocker') &&
+      !lower.startsWith('clear blocker') &&
+      !lower.startsWith('unblock task') &&
+      !lower.startsWith('unblock ') &&
+      !lower.includes('resolve the blocker') &&
+      !lower.startsWith('block task') &&
+      (
+        lower.includes('blocked task') ||
+        lower.includes('blocked work') ||
+        lower.includes('blocked item') ||
+        lower.includes('all blocker') ||
+        lower.includes('all blocked') ||
+        lower.includes('list blocker') ||
+        lower.includes('show blocker') ||
+        lower.includes('which tasks are blocked') ||
+        lower.includes('tasks are blocked') ||
+        lower.includes('tasks blocked') ||
+        lower.includes('task is blocked') ||
+        lower.includes('find all blocked') ||
+        lower.includes('find blocked') ||
+        lower.includes('blockers across') ||
+        lower.includes('check blocked') ||
+        lower.includes('show blocked') ||
+        lower.includes('are there any blocked') ||
+        lower.includes('any blocked tasks') ||
+        lower.includes('any blockers') ||
+        lower === 'blockers' ||
+        lower === 'blocked tasks'
+      )
+    ) {
+      return {
+        intent: INTENTS.LIST_BLOCKERS,
+        targetProject: null,
+        targetTask: null,
+        targetRepo: null,
+        actionType: 'list_blockers',
+        requiresClarification: false,
+        clarificationReason: null,
+        confidence: 0.96
+      };
+    }
+
+    // 15. Overdue Tasks Query Intent (Evaluated before maintenance & investigation)
+    if (
+      !lower.includes('maintenance') &&
+      !lower.includes('certificate') &&
+      !lower.includes('cert ') &&
+      !lower.includes('ssl') &&
+      (
+        lower.includes('overdue task') ||
+        lower.includes('tasks are overdue') ||
+        lower.includes('tasks overdue') ||
+        lower.includes('task is overdue') ||
+        lower.includes('what tasks are overdue') ||
+        lower.includes('which tasks are overdue') ||
+        lower.includes('past their due date') ||
+        lower.includes('past due date') ||
+        lower.includes('past deadline') ||
+        lower.includes('missed deadline') ||
+        lower.includes('review overdue') ||
+        lower.includes('show overdue') ||
+        lower.includes('show all overdue') ||
+        lower.includes('list overdue') ||
+        (lower.includes('overdue') && (lower.includes('task') || lower.includes('work') || lower.includes('item') || lower.includes('all')))
+      )
+    ) {
+      return {
+        intent: INTENTS.OVERDUE_TASKS,
+        targetProject: null,
+        targetTask: null,
+        targetRepo: null,
+        actionType: 'list_tasks',
+        requiresClarification: false,
+        clarificationReason: null,
+        confidence: 0.96
+      };
+    }
+
+    // 16. Maintenance Review Intent
     if (
       lower.includes('maintenance') ||
       lower.includes('cert expiry') ||
+      lower.includes('certificate rotation') ||
+      lower.includes('certificate renewals') ||
+      lower.includes('certificate') ||
       lower.includes('rotation') ||
-      lower.includes('overdue maintenance')
+      lower.includes('ssl') ||
+      lower.includes('overdue maintenance') ||
+      lower.includes('overdue certificate')
     ) {
       return {
         intent: INTENTS.MAINTENANCE_REVIEW,
@@ -359,7 +566,7 @@ export class IntentClassifier {
       };
     }
 
-    // 15. Audit Log Intent
+    // 17. Audit Log Intent
     if (
       lower.includes('audit log') ||
       lower.includes('audit trail') ||
@@ -378,29 +585,42 @@ export class IntentClassifier {
       };
     }
 
-    // 16. Project Investigation Intent (Default for health, issues, performance, checking status)
+    // 18. Project Investigation Intent (Default for health, issues, performance, checking status)
     if (
-      lower.startsWith('inspect') ||
-      lower.startsWith('investigate') ||
-      lower.startsWith('audit') ||
-      lower.startsWith('examine') ||
-      lower.startsWith('check') ||
-      lower.startsWith('show') ||
-      lower.startsWith('what is') ||
-      lower.startsWith("what's") ||
-      lower.startsWith('how is') ||
-      lower.startsWith('tell me about') ||
-      lower.includes('not running properly') ||
-      lower.includes('not working properly') ||
-      lower.includes('not working') ||
-      lower.includes('not runing') ||
-      lower.includes('error ka yetoy') ||
-      lower.includes('slow chal raha') ||
-      lower.includes('open hot nahi') ||
-      lower.includes('status batao') ||
-      lower.includes('status sanga') ||
-      lower.includes('project status') ||
-      lower.includes('project health')
+      !lower.includes('blocked task') &&
+      !lower.includes('blocked work') &&
+      !lower.includes('all blocker') &&
+      !lower.includes('overdue task') &&
+      !lower.includes('past their due date') &&
+      !lower.includes('past due date') &&
+      (
+        lower.startsWith('inspect') ||
+        lower.startsWith('investigate') ||
+        lower.startsWith('audit') ||
+        lower.startsWith('examine') ||
+        lower.startsWith('check') ||
+        lower.startsWith('show') ||
+        lower.startsWith('what is') ||
+        lower.startsWith("what's") ||
+        lower.startsWith('how is') ||
+        lower.startsWith('tell me about') ||
+        lower.includes('not running properly') ||
+        lower.includes('not working properly') ||
+        lower.includes('not working') ||
+        lower.includes('not runing') ||
+        lower.includes('error ka yetoy') ||
+        lower.includes('slow chal raha') ||
+        lower.includes('open hot nahi') ||
+        lower.includes('status batao') ||
+        lower.includes('status sanga') ||
+        lower.includes('project status') ||
+        lower.includes('project health') ||
+        lower.includes('तपासा') ||
+        lower.includes('तपासणी') ||
+        lower.includes('तपासावे') ||
+        lower.includes('जांच') ||
+        lower.includes('जांचो')
+      )
     ) {
       const extracted = this._extractProjectQuery(lower) || anaphora?.resolvedProject?.id || null;
       return {
@@ -431,15 +651,22 @@ export class IntentClassifier {
   _extractProjectQuery(lowerText) {
     // Strips common investigative filler words across English, Hindi, and Marathi
     return lowerText
-      .replace(/^(?:investigate|inspect|audit|examine|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|tell\s+me\s+about|give\s+me(?:\s+details)?)\s+/i, '')
+      .replace(/^(?:investigate|inspect|audit|examine|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|tell\s+me\s+about|give\s+me(?:\s+details)?|तपासा|तपासणी|जांच(?:\s+करो)?)\s+/i, '')
       .replace(/^(?:the\s+|my\s+|our\s+|this\s+|mera\s+|meri\s+|majha\s+|majhi\s+|majhe\s+)?(?:project\s+|app\s+)?/i, '')
-      .replace(/\s+(?:status|health|details|doing|please|slow\s+chal\s+raha\s+hai|not\s+running\s+properly|not\s+working|error\s+ka\s+yetoy|open\s+hot\s+nahi|ka\s+status\s+batao|check\s+karo)$/i, '')
+      .replace(/\s+(?:status|health|details|doing|please|slow\s+chal\s+raha\s+hai|not\s+running\s+properly|not\s+working|error\s+ka\s+yetoy|open\s+hot\s+nahi|ka\s+status\s+batao|check\s+karo|तपासा|तपासणी|तपासावे|जांच|जांचो)$/i, '')
       .trim();
   }
 
   _extractTaskQuery(lowerText) {
     return lowerText
       .replace(/^(?:complete\s+task|finish\s+task|mark\s+task|complete\s+the\s+task|reopen\s+task|re-open\s+task|unblock\s+task|block\s+task)\s+/i, '')
+      .replace(/['"]+/g, '')
+      .trim();
+  }
+
+  _extractTaskSearchQuery(lowerText) {
+    return lowerText
+      .replace(/^(?:find\s+a\s+task\s+by\s+its\s+title|find\s+task\s+by\s+its\s+title|find\s+a\s+task\s+by\s+title|find\s+task\s+by\s+title|find\s+task\s+called|find\s+task\s+named|find\s+a\s+task|find\s+task|search\s+task|locate\s+task|task\s+shodha|task\s+khojo)(?:\s+for|\s+called|\s+named)?\s*/i, '')
       .replace(/['"]+/g, '')
       .trim();
   }

@@ -9,27 +9,29 @@ export class NaturalResponseEngine {
    * Formats a structured, evidence-based project investigation report.
    */
   formatInvestigationReport({ project, details, health, blockers = [], tasks = [], language = 'en', script = 'latin' }) {
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
+    const safeBlockers = Array.isArray(blockers) ? blockers : [];
     const pName = project?.name || 'Project';
     const status = project?.status || 'active';
     const healthStatus = health?.healthStatus || 'Insufficient Data';
     const score = health?.score !== undefined ? `${health.score}/100` : 'N/A';
-    const blockerCount = blockers.length;
+    const blockerCount = safeBlockers.length;
 
     // 1. Marathi Response
     if (language === 'mr' || language === 'marathiglish') {
       let text = `### 🔍 **${pName} — तपासणी अहवाल**\n\n`;
-      text += `• **सद्यस्थिती:** ${status.toUpperCase()} | **आरोग्य दर्जा (Health):** ${healthStatus} (${score})\n`;
-      text += `• **नोंदणीकृत कामे (Tasks):** ${tasks.length} एकूण | **सक्रिय अडथळे (Blockers):** ${blockerCount}\n\n`;
+      text += `• **सद्यस्थिती:** ${status.toUpperCase()} | **आरोग्य दर्जा (Health):** ${healthStatus} (स्कोअर: ${score})\n`;
+      text += `• **नोंदणीकृत कामे (Tasks):** ${safeTasks.length} एकूण | **सक्रिय अडथळे (Blockers):** ${blockerCount}\n\n`;
 
       if (blockerCount > 0) {
         text += `#### ⚠️ **निश्चित आढळलेले दोष (Confirmed Findings):**\n`;
-        blockers.forEach((b, idx) => {
+        safeBlockers.forEach((b, idx) => {
           text += `**${idx + 1}. [गंभीर अडथळा / Critical Blocker]** ${b.title || b.id}\n`;
           text += `   • **तपशील / पुरावा:** ${b.blockerReason || b.blocker || 'कारणाचे तपशील उपलब्ध नाहीत'}\n`;
           text += `   • **परिणाम:** जोपर्यंत हा अडथळा दूर होत नाही, तोपर्यंत कार्यप्रवाह पुढे जाऊ शकत नाही.\n`;
         });
         text += `\n`;
-      } else if (tasks.length === 0) {
+      } else if (safeTasks.length === 0) {
         text += `ℹ️ **माहिती अपुरी आहे (Insufficient Data):** या प्रोजेक्टमध्ये कोणतीही कामे (tasks) नोंदवलेली नाहीत, त्यामुळे सखोल विश्लेषण करता आले नाही.\n\n`;
       } else {
         text += `✅ **सर्व प्रणाली सामान्य:** सध्या कोणताही सक्रिय अडथळा आढळला नाही.\n\n`;
@@ -49,18 +51,18 @@ export class NaturalResponseEngine {
     // 2. Hindi / Hinglish Response
     if (language === 'hi' || language === 'hinglish') {
       let text = `### 🔍 **${pName} — प्रोजेक्ट जाँच रिपोर्ट**\n\n`;
-      text += `• **स्टेटस:** ${status.toUpperCase()} | **हेल्थ स्थिति (Health):** ${healthStatus} (${score})\n`;
-      text += `• **कुल टास्क्स (Tasks):** ${tasks.length} | **सक्रिय ब्लॉकर्स (Blockers):** ${blockerCount}\n\n`;
+      text += `• **स्टेटस:** ${status.toUpperCase()} | **हेल्थ स्थिति (Health):** ${healthStatus} (स्कोर: ${score})\n`;
+      text += `• **कुल टास्क्स (Tasks):** ${safeTasks.length} | **सक्रिय ब्लॉकर्स (Blockers):** ${blockerCount}\n\n`;
 
       if (blockerCount > 0) {
         text += `#### ⚠️ **पुष्ट निष्कर्ष (Confirmed Findings):**\n`;
-        blockers.forEach((b, idx) => {
+        safeBlockers.forEach((b, idx) => {
           text += `**${idx + 1}. [क्रिटिकल ब्लॉकर / Critical Blocker]** ${b.title || b.id}\n`;
           text += `   • **कारण व साक्ष्य (Evidence):** ${b.blockerReason || b.blocker || 'विवरण अनुपलब्ध'}\n`;
           text += `   • **प्रभाव:** इस समस्या के कारण डिप्लॉयमेंट या कार्यप्रवाह रुका हुआ है।\n`;
         });
         text += `\n`;
-      } else if (tasks.length === 0) {
+      } else if (safeTasks.length === 0) {
         text += `ℹ️ **अपर्याप्त डेटा (Insufficient Data):** इस प्रोजेक्ट में कोई टास्क्स दर्ज नहीं हैं, अतः हेल्थ का पूर्ण मूल्यांकन संभव नहीं हुआ।\n\n`;
       } else {
         text += `✅ **सिस्टम सुचारू:** प्रोजेक्ट में कोई सक्रिय ब्लॉकर नहीं है।\n\n`;
@@ -79,19 +81,19 @@ export class NaturalResponseEngine {
 
     // 3. Default English Response (Structured, professional, evidence-backed)
     let text = `### 🔍 **Investigation Report: ${pName}**\n\n`;
-    text += `• **Project Status:** \`${status.toUpperCase()}\` | **Health Classification:** \`${healthStatus}\` (${score})\n`;
-    text += `• **Registered Tasks:** ${tasks.length} total | **Active Blockers:** ${blockerCount}\n\n`;
+    text += `• **Project Status:** \`${status.toUpperCase()}\` | **Health Classification:** \`${healthStatus}\` (Score: ${score})\n`;
+    text += `• **Registered Tasks:** ${safeTasks.length} total | **Active Blockers:** ${blockerCount}\n\n`;
 
     if (blockerCount > 0) {
       text += `#### ⚠️ **Confirmed Operational Findings:**\n`;
-      blockers.forEach((b, idx) => {
+      safeBlockers.forEach((b, idx) => {
         text += `**${idx + 1}. [CRITICAL BLOCKER] ${b.title || b.id}**\n`;
         text += `   • **Evidence Source:** Persisted Task Record (\`${b.id}\`)\n`;
         text += `   • **Reported Cause:** ${b.blockerReason || b.blocker}\n`;
         text += `   • **Impact:** Directly degrades health to \`${healthStatus}\` and impedes release readiness.\n`;
       });
       text += `\n`;
-    } else if (tasks.length === 0) {
+    } else if (safeTasks.length === 0) {
       text += `ℹ️ **Insufficient Data:** Project has 0 registered tasks. Health cannot be verified without recorded operational scope.\n\n`;
     } else {
       text += `✅ **No Active Blockers:** All registered tasks are unblocked or completed.\n\n`;

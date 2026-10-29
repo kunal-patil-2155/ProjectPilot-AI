@@ -12,7 +12,12 @@ const MARATHI_DEVANAGARI_WORDS = new Set([
   'आहे', 'आहेत', 'नाही', 'नाहीत', 'माझा', 'माझी', 'माझे', 'आमचा', 'आमची',
   'काय', 'झाला', 'झाली', 'झाले', 'येतोय', 'येते', 'दाखवा', 'सांगा', 'करा',
   'होत', 'होते', 'काम', 'बघा', 'कशामुळे', 'मदत', 'परत', 'सुरू', 'बंद',
-  'मध्ये', 'चा', 'ची', 'चे', 'च्या', 'कधी', 'किती'
+  'मध्ये', 'चा', 'ची', 'चे', 'च्या', 'कधी', 'किती',
+  // Distinctive Marathi operational and project terminology
+  'तपासा', 'तपासावे', 'तपासणी', 'कामे', 'प्रकल्प', 'सर्व', 'अडथळा', 'अडथळे',
+  'स्थिती', 'महत्त्वाचे', 'महत्त्वाचा', 'महत्त्वाची', 'आजचे', 'आजचा', 'आजची',
+  'करावे', 'करायचे', 'करायचा', 'करायची', 'द्या', 'सांग', 'माहिती', 'पूर्ण',
+  'सविस्तर', 'स्पष्टीकरण', 'पहिले', 'कारण', 'कोणते', 'कोणता', 'कोणती'
 ]);
 
 // Hindi-specific Devanagari tokens
@@ -20,7 +25,11 @@ const HINDI_DEVANAGARI_WORDS = new Set([
   'है', 'हैं', 'नहीं', 'मेरा', 'मेरी', 'मेरे', 'हमारा', 'हमारी',
   'क्या', 'हुआ', 'हुई', 'हुए', 'आया', 'आई', 'आए', 'दिखाओ', 'बताओ',
   'करो', 'कीजिये', 'रहा', 'रही', 'रहे', 'चल', 'मदद', 'वापस', 'शुरू',
-  'में', 'का', 'की', 'के', 'कब', 'कितना'
+  'में', 'का', 'की', 'के', 'कब', 'कितना',
+  // Distinctive Hindi operational and project terminology
+  'जांच', 'जांचो', 'परियोजना', 'कार्य', 'सभी', 'सारे', 'रुकावट', 'रुकावटें',
+  'स्थिति', 'महत्वपूर्ण', 'दीजिये', 'दो', 'जानकारी', 'विस्तार', 'पहला', 'पहले',
+  'कौनसा', 'कौनसी'
 ]);
 
 // Romanized Marathi tokens
@@ -41,10 +50,10 @@ const ROMAN_HINDI_WORDS = new Set([
 
 // Explicit language request patterns
 const EXPLICIT_LANGUAGE_PATTERNS = [
-  { lang: 'mr', regex: /\b(?:in\s+marathi|marathi\s+madhe|speak\s+in\s+marathi|marathi\s+me|(?:explain|tell|sanga).*(?:in\s+)?(?:simple\s+)?marathi)\b/i },
-  { lang: 'hi', regex: /\b(?:in\s+hindi|hindi\s+me(?:in)?|speak\s+in\s+hindi|hindi\s+bhasha|(?:explain|tell|batao).*(?:in\s+)?(?:simple\s+)?hindi)\b/i },
-  { lang: 'en', regex: /\b(?:in\s+english|speak\s+in\s+english|english\s+me(?:in)?|(?:explain|tell).*(?:in\s+)?english)\b/i },
-  { lang: 'hinglish', regex: /\b(?:in\s+hinglish|hinglish\s+me(?:in)?|speak\s+in\s+hinglish)\b/i }
+  { lang: 'mr', regex: /\b(?:in\s+marathi|marathi\s+madhe|speak\s+in\s+marathi|marathi\s+me|switch\s+(?:to\s+)?marathi|change\s+(?:language\s+)?to\s+marathi|(?:explain|tell|sanga).*(?:in\s+)?(?:simple\s+)?marathi)\b/i },
+  { lang: 'hi', regex: /\b(?:in\s+hindi|hindi\s+me(?:in)?|speak\s+in\s+hindi|hindi\s+bhasha|switch\s+(?:to\s+)?hindi|change\s+(?:language\s+)?to\s+hindi|(?:explain|tell|batao).*(?:in\s+)?(?:simple\s+)?hindi)\b/i },
+  { lang: 'en', regex: /\b(?:in\s+english|speak\s+in\s+english|english\s+me(?:in)?|switch\s+(?:to\s+)?english|change\s+(?:language\s+)?to\s+english|(?:explain|tell).*(?:in\s+)?english)\b/i },
+  { lang: 'hinglish', regex: /\b(?:in\s+hinglish|hinglish\s+me(?:in)?|speak\s+in\s+hinglish|switch\s+(?:to\s+)?hinglish|change\s+(?:language\s+)?to\s+hinglish)\b/i }
 ];
 
 export class LanguageDetector {
@@ -127,11 +136,13 @@ export class LanguageDetector {
       if (hiDevScore > mrDevScore) {
         return { language: 'hi', script, confidence: 0.9, explicitSwitch: false, requestedLanguage: null };
       }
-      // If equal, check context language, else default to Hindi for Devanagari
+      // If equal, preserve established context language if Indic, else mark as ambiguous with low confidence (0.5)
+      // to prevent poisoning persistent conversational preferences
+      const isEstablishedIndic = contextLanguage === 'mr' || contextLanguage === 'hi';
       return {
-        language: contextLanguage === 'mr' ? 'mr' : 'hi',
+        language: isEstablishedIndic ? contextLanguage : 'hi',
         script,
-        confidence: 0.75,
+        confidence: isEstablishedIndic ? 0.6 : 0.5,
         explicitSwitch: false,
         requestedLanguage: null
       };

@@ -1781,17 +1781,8 @@ function setupGitHubAuditView() {
       btn.textContent = 'Auditing...';
 
       try {
-        let report;
-        try {
-          const res = await state.mcpClient.callTool('inspect_github_repo', { repoUrl: url });
-          report = res.data;
-        } catch {
-          const { GitHubService } = await import('./services/githubService.js').catch(() => ({}));
-          if (GitHubService) {
-            const gh = new GitHubService();
-            report = await gh.inspectRepository(url);
-          }
-        }
+        const res = await state.mcpClient.callTool('inspect_github_repo', { repoUrl: url });
+        const report = res.data;
 
         if (resultsCard && content && report) {
           resultsCard.style.display = 'block';

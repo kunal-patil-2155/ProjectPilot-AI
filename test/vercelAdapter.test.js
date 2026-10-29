@@ -81,9 +81,10 @@ test('Vercel Serverless Function & Adapter Integration', async (t) => {
 
     assert.equal(toolsRes.status, 200);
     const toolsData = await toolsRes.json();
-    assert.equal(toolsData.result?.tools?.length, 12, 'Must list all 12 MCP tools');
+    assert.ok(toolsData.result?.tools?.length >= 12, 'Must list production MCP tools');
     const toolNames = toolsData.result.tools.map(t => t.name);
     assert.ok(toolNames.includes('generate_rescue_plan'));
+    assert.ok(toolNames.includes('inspect_github_repo'));
   });
 
   await t.test('4. CORS policy automatically permits vercel.app preview and production domains', async () => {

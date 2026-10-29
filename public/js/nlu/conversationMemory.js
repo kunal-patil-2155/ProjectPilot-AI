@@ -128,8 +128,8 @@ export class ConversationMemory {
     const actionFixRegex = /\b(?:fix\s+it|resolve\s+it|solve\s+it|fix\s+karo|solve\s+karo|he\s+fix\s+kara|durust\s+kara)\b/i;
     const hasActionFix = actionFixRegex.test(lower);
 
-    // 4. Check findings query follow-up ("what did you find", "explain it", "what happened")
-    const findingsQueryRegex = /\b(?:what\s+did\s+you\s+find|findings|kay\s+sapadla|kya\s+mila|explain\s+it|explain\s+findings)\b/i;
+    // 4. Check findings query follow-up ("what did you find", "explain it", "explain this", "what happened")
+    const findingsQueryRegex = /\b(?:what\s+did\s+you\s+find|findings|kay\s+sapadla|kya\s+mila|explain\s+it|explain\s+this|explain\s+findings|he\s+sanga|yeh\s+batao)\b/i;
     const hasFindingsQuery = findingsQueryRegex.test(lower);
 
     let anaphoraType = null;

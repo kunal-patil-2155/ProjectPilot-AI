@@ -23,6 +23,7 @@ import {
   LanguageDetector,
   ConversationMemory,
   IntentClassifier,
+  INTENTS,
   NaturalResponseEngine,
   ModelProvider,
   LocalNaturalIntelligenceEngine
@@ -34,6 +35,7 @@ export {
   LanguageDetector,
   ConversationMemory,
   IntentClassifier,
+  INTENTS,
   NaturalResponseEngine,
   ModelProvider,
   LocalNaturalIntelligenceEngine
@@ -177,11 +179,156 @@ export function extractRescueQuery(rawText) {
 }
 
 /**
+ * Checks whether an incoming text intends a cross-project blocker review.
+ */
+export function isBlockerReviewIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  // Exclude explicit mutation commands (resolving/clearing blockers)
+  if (
+    norm.startsWith('resolve blocker') ||
+    norm.startsWith('clear blocker') ||
+    norm.startsWith('unblock task') ||
+    norm.startsWith('unblock ') ||
+    norm.includes('resolve the blocker') ||
+    norm.startsWith('block task')
+  ) {
+    return false;
+  }
+  return (
+    norm.includes('blocked task') ||
+    norm.includes('blocked work') ||
+    norm.includes('blocked item') ||
+    norm.includes('all blocker') ||
+    norm.includes('all blocked') ||
+    norm.includes('list blocker') ||
+    norm.includes('show blocker') ||
+    norm.includes('which tasks are blocked') ||
+    norm.includes('tasks are blocked') ||
+    norm.includes('tasks blocked') ||
+    norm.includes('task is blocked') ||
+    norm.includes('find all blocked') ||
+    norm.includes('find blocked') ||
+    norm.includes('blockers across') ||
+    norm.includes('check blocked') ||
+    norm.includes('show blocked') ||
+    norm.includes('are there any blocked') ||
+    norm.includes('any blocked tasks') ||
+    norm.includes('any blockers') ||
+    norm === 'blockers' ||
+    norm === 'blocked tasks'
+  );
+}
+
+/**
+ * Checks whether an incoming text intends an overdue tasks query.
+ */
+export function isOverdueTasksIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  // Exclude explicit maintenance queries
+  if (
+    norm.includes('maintenance') ||
+    norm.includes('certificate') ||
+    norm.includes('cert ') ||
+    norm.includes('ssl')
+  ) {
+    return false;
+  }
+  return (
+    norm.includes('overdue task') ||
+    norm.includes('tasks are overdue') ||
+    norm.includes('tasks overdue') ||
+    norm.includes('task is overdue') ||
+    norm.includes('what tasks are overdue') ||
+    norm.includes('which tasks are overdue') ||
+    norm.includes('past their due date') ||
+    norm.includes('past due date') ||
+    norm.includes('past deadline') ||
+    norm.includes('missed deadline') ||
+    norm.includes('review overdue') ||
+    norm.includes('show overdue') ||
+    norm.includes('show all overdue') ||
+    norm.includes('list overdue') ||
+    (norm.includes('overdue') && (norm.includes('task') || norm.includes('work') || norm.includes('item') || norm.includes('all')))
+  );
+}
+
+/**
+ * Checks whether an incoming text intends a maintenance review.
+ */
+export function isMaintenanceReviewIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  // Exclude general overdue non-maintenance task queries
+  if (
+    norm.includes('overdue task') ||
+    norm.includes('tasks overdue') ||
+    norm.includes('tasks are overdue') ||
+    norm.includes('past their due date') ||
+    norm.includes('past due date')
+  ) {
+    return false;
+  }
+  return (
+    norm.includes('maintenance') ||
+    norm.includes('cert expiry') ||
+    norm.includes('certificate rotation') ||
+    norm.includes('certificate renewals') ||
+    norm.includes('certificate') ||
+    norm.includes('ssl renewal') ||
+    norm.includes('ssl cert') ||
+    norm.includes('ssl') ||
+    norm.includes('overdue certificate') ||
+    norm.includes('overdue maintenance') ||
+    (norm.includes('rotation') && (norm.includes('cert') || norm.includes('key') || norm.includes('credential')))
+  );
+}
+
+/**
+ * Checks whether an incoming text intends a greeting, identity, or capability query.
+ */
+export function isGreetingOrIdentityIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  return (
+    /^(?:hi|hello|hey|namaste|namaskar|good\s+morning|good\s+evening|pranam|kasa\s+kay|kaise\s+ho)\b/i.test(norm) ||
+    norm.includes('who are you') ||
+    norm.includes('who r u') ||
+    norm.includes('introduce yourself') ||
+    norm.includes('tell me about yourself') ||
+    norm.includes('what can you do') ||
+    norm.includes('what are your capabilities') ||
+    norm.includes('what do you do') ||
+    norm.includes('how can you help') ||
+    norm.includes('your capabilities') ||
+    norm.includes('kon ahes') ||
+    norm.includes('kon ahat') ||
+    norm.includes('olakh dya') ||
+    norm.includes('kaun ho') ||
+    norm.includes('kaun hain') ||
+    norm.includes('parichay do') ||
+    norm.includes('kya kar sakte ho') ||
+    norm.includes('kay karu shaktas')
+  );
+}
+
+/**
  * Checks whether an incoming text intends a project investigation.
  */
 export function isProjectInvestigationIntent(text) {
   const norm = normalizeIntentText(text);
   if (!norm) return false;
+
+  // Exclude cross-project blocker, overdue, maintenance, and greeting/identity queries
+  if (
+    isBlockerReviewIntent(norm) ||
+    isOverdueTasksIntent(norm) ||
+    isMaintenanceReviewIntent(norm) ||
+    isGreetingOrIdentityIntent(norm)
+  ) {
+    return false;
+  }
 
   return (
     norm.startsWith('inspect') ||
@@ -566,12 +713,12 @@ export class AssistantOrchestrator {
     // Natural Intelligence & Multilingual Understanding
     // -------------------------------------------------------------
     // 1. Language Detection & Preference Tracking
-    const langInfo = this.languageDetector.detect(text);
+    const langInfo = this.languageDetector.detect(text, this.memory.preferredLanguage);
     const detectedLang = langInfo.language;
-    if (langInfo.isSwitchCommand || (detectedLang !== 'en' && langInfo.confidence >= 0.7)) {
+    if (langInfo.isSwitchCommand || (detectedLang !== 'en' && langInfo.confidence >= 0.75)) {
       this.memory.preferredLanguage = detectedLang;
     }
-    const activeLang = langInfo.requestedLanguage || (detectedLang !== 'en' ? detectedLang : this.memory.preferredLanguage);
+    const activeLang = langInfo.requestedLanguage || (detectedLang !== 'en' && langInfo.confidence >= 0.75 ? detectedLang : this.memory.preferredLanguage);
 
     // 2. Spelling & Typo Normalization (protecting identifiers/IDs/code)
     const normResult = this.spellingNormalizer.normalize(text);
@@ -588,9 +735,14 @@ export class AssistantOrchestrator {
     this.memory.recordTurn('user', text, classified.intent);
 
     // -------------------------------------------------------------
-    // Greetings (Multilingual)
+    // Greetings & Identity / Capabilities (Multilingual)
+    // e.g. "Hello", "Hello, who are you?", "Introduce yourself.", "What can you do?"
     // -------------------------------------------------------------
-    if (classified.intent === 'GREETING') {
+    if (
+      classified.intent === 'GREETING' ||
+      isGreetingOrIdentityIntent(text) ||
+      isGreetingOrIdentityIntent(normalizedText)
+    ) {
       return {
         workflow: 'greeting',
         toolCalls: [],
@@ -607,16 +759,41 @@ export class AssistantOrchestrator {
         const pName = inv.project.name || inv.project.id;
         const hStatus = inv.health?.healthStatus || 'Evaluated';
         const blockers = inv.blockers || [];
-        let exp = `### 🔍 Investigation Findings: **${pName}**\n\n`;
-        exp += `• **Health Classification:** \`${hStatus}\`\n`;
-        exp += `• **Active Blockers Identified:** ${blockers.length}\n`;
-        if (blockers.length > 0) {
-          blockers.forEach((b, idx) => {
-            exp += `  ${idx + 1}. **${b.taskTitle || b.title || b.id}:** ${b.blockerReason || b.blocker}\n`;
-          });
+        let exp = '';
+        if (activeLang === 'mr') {
+          exp = `### 🔍 तपासणी निष्कर्ष (Investigation Findings): **${pName}**\n\n`;
+          exp += `• **आरोग्य दर्जा (Health):** \`${hStatus}\`\n`;
+          exp += `• **सक्रिय अडथळे (Active Blockers):** ${blockers.length}\n`;
+          if (blockers.length > 0) {
+            blockers.forEach((b, idx) => {
+              exp += `  ${idx + 1}. **${b.taskTitle || b.title || b.id}:** ${b.blockerReason || b.blocker}\n`;
+            });
+          }
+          exp += `\n**पडताळणी पुरावा (Verified Evidence):** डेटा थेट प्रोजेक्ट रेकॉर्डमधून तपासला आहे.\n`;
+          exp += `**पुढील कृती:** हे अडथळे दूर करण्यासाठी तुम्ही "same issue fix karo" किंवा "prepare rescue plan" असे सांगू शकता.`;
+        } else if (activeLang === 'hi') {
+          exp = `### 🔍 जांच निष्कर्ष (Investigation Findings): **${pName}**\n\n`;
+          exp += `• **स्वास्थ्य स्थिति (Health):** \`${hStatus}\`\n`;
+          exp += `• **सक्रिय रुकावटें (Active Blockers):** ${blockers.length}\n`;
+          if (blockers.length > 0) {
+            blockers.forEach((b, idx) => {
+              exp += `  ${idx + 1}. **${b.taskTitle || b.title || b.id}:** ${b.blockerReason || b.blocker}\n`;
+            });
+          }
+          exp += `\n**सत्यापित साक्ष्य:** डेटा सीधे प्रोजेक्ट रिकॉर्ड से सत्यापित है।\n`;
+          exp += `**अगली कार्रवाई:** इन रुकावटों को हल करने के लिए "same issue fix karo" कहें।`;
+        } else {
+          exp = `### 🔍 Investigation Findings: **${pName}**\n\n`;
+          exp += `• **Health Classification:** \`${hStatus}\`\n`;
+          exp += `• **Active Blockers Identified:** ${blockers.length}\n`;
+          if (blockers.length > 0) {
+            blockers.forEach((b, idx) => {
+              exp += `  ${idx + 1}. **${b.taskTitle || b.title || b.id}:** ${b.blockerReason || b.blocker}\n`;
+            });
+          }
+          exp += `\n**Verified Evidence:** Data loaded directly from local database records.\n`;
+          exp += `**Next Action:** You can say "same issue fix karo" or "prepare rescue plan" to address these findings.`;
         }
-        exp += `\n**Verified Evidence:** Data loaded directly from local database records.\n`;
-        exp += `**Next Action:** You can say "same issue fix karo" or "prepare rescue plan" to address these findings.`;
         return {
           workflow: 'investigation_findings_summary',
           toolCalls: [],
@@ -712,6 +889,47 @@ export class AssistantOrchestrator {
     }
 
     // -------------------------------------------------------------
+    // Workflow: Explain Priority Scoring Formula
+    // e.g. "explain the daily-priority scoring formula", "explain priority formula"
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'EXPLAIN_FORMULA' ||
+      normLower.includes('priority formula') ||
+      normLower.includes('scoring formula') ||
+      normLower.includes('explain the daily-priority') ||
+      normLower.includes('explain daily-priority')
+    ) {
+      return this._workflowExplainFormula(activeLang);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Explain Concept (MCP, Streamable HTTP, Architecture)
+    // e.g. "explain mcp in simple english", "what is streamable http"
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'EXPLAIN_CONCEPT' ||
+      (normLower.startsWith('explain ') && (normLower.includes('mcp') || normLower.includes('streamable') || normLower.includes('architecture'))) ||
+      normLower.startsWith('what is mcp') ||
+      normLower.startsWith('what is streamable')
+    ) {
+      const concept = classified.concept || (normLower.includes('streamable') ? 'streamable_http' : (normLower.includes('architecture') ? 'architecture' : 'mcp'));
+      return this._workflowExplainConcept(concept, activeLang);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Find Task Discovery (Title / ID Search)
+    // e.g. "find task by title", "find a task by its title", "find task Fix checkout..."
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'FIND_TASK' ||
+      normLower.startsWith('find task') ||
+      normLower.startsWith('search task') ||
+      normLower.startsWith('find a task')
+    ) {
+      return this._workflowFindTask(text, activeLang);
+    }
+
+    // -------------------------------------------------------------
     // Workflow 1: Daily priorities
     // -------------------------------------------------------------
     if (
@@ -765,17 +983,56 @@ export class AssistantOrchestrator {
     }
 
     // -------------------------------------------------------------
-    // Workflow 5: Maintenance review (evaluated before project investigation)
+    // Workflow: Cross-Project Blocked Tasks Review
+    // e.g. "Show all blocked tasks", "List blockers across all projects", "Which tasks are blocked?"
     // -------------------------------------------------------------
     if (
-      lower.includes('maintenance') ||
-      lower.includes('overdue') ||
-      lower.includes('cert') ||
-      lower.includes('rotation') ||
-      normLower.includes('maintenance') ||
-      classified.intent === 'MAINTENANCE_REVIEW'
+      classified.intent === 'LIST_BLOCKERS' ||
+      isBlockerReviewIntent(text) ||
+      isBlockerReviewIntent(normalizedText)
+    ) {
+      return this._workflowBlockerReview(activeLang);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Overdue Tasks Query
+    // e.g. "Show all overdue tasks", "Review overdue tasks", "What tasks are overdue?"
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'OVERDUE_TASKS' ||
+      isOverdueTasksIntent(text) ||
+      isOverdueTasksIntent(normalizedText)
+    ) {
+      return this._workflowOverdueTasks(activeLang);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow 5: Maintenance review (evaluated for explicit maintenance queries)
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'MAINTENANCE_REVIEW' ||
+      isMaintenanceReviewIntent(text) ||
+      isMaintenanceReviewIntent(normalizedText)
     ) {
       return this._workflowMaintenanceReview();
+    }
+
+    // -------------------------------------------------------------
+    // Language Switch
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'SWITCH_LANGUAGE' ||
+      (langInfo.isSwitchCommand &&
+        !anaphoraResolution?.anaphoraType &&
+        !normLower.includes('priority') &&
+        !normLower.includes('priorities') &&
+        !normLower.includes('task') &&
+        !normLower.includes('project') &&
+        !normLower.includes('investigate') &&
+        !normLower.includes('explain'))
+    ) {
+      const targetLang = classified.targetLanguage || langInfo.requestedLanguage || activeLang || 'en';
+      return this._workflowSwitchLanguage(targetLang);
     }
 
     // -------------------------------------------------------------
@@ -998,6 +1255,14 @@ You can ask me to:
     if (recs.length === 0) {
       explanation += 'No pending tasks found. All recorded work is currently marked as done!';
     } else {
+      const executableTasks = recs.filter(r => r.executionReadiness === 'Ready');
+      if (executableTasks.length === 0) {
+        explanation += `⚠️ **Notice:** All recommended pending tasks are currently blocked. No executable tasks are immediately available; resolve active blockers first.\n\n`;
+      } else {
+        const topExecutable = executableTasks[0];
+        explanation += `🎯 **Immediate Focus:** Complete **${topExecutable.title}** (Project: *${topExecutable.projectName}*, Score: ${topExecutable.score} pts, Readiness: Ready)\n\n`;
+      }
+
       recs.forEach((r, idx) => {
         explanation += `**${idx + 1}. [${r.priority.toUpperCase()}] ${r.title}** (Project: *${r.projectName}*)\n`;
         explanation += `   • **Score:** ${r.score} pts | **Status:** ${r.currentStatus} | **Readiness:** ${r.executionReadiness}\n`;
@@ -1007,6 +1272,196 @@ You can ask me to:
 
     return {
       workflow: 'daily_priorities',
+      toolCalls,
+      explanation
+    };
+  }
+
+  _workflowSwitchLanguage(targetLang = 'en') {
+    this.memory.preferredLanguage = targetLang;
+    let explanation = '';
+    if (targetLang === 'mr') {
+      explanation = 'भाषा यशस्वीरित्या **मराठी** मध्ये बदलण्यात आली आहे. मी तुमच्या प्रकल्पांच्या व्यवस्थापनात कशी मदत करू?';
+    } else if (targetLang === 'hi') {
+      explanation = 'भाषा सफलतापूर्वक बदलकर **हिन्दी** कर दी गई है। मैं आपकी परियोजनाओं में कैसे सहायता कर सकता हूँ?';
+    } else {
+      explanation = 'Language successfully switched to **English**. How can I help you with your projects today?';
+    }
+
+    return {
+      workflow: 'switch_language',
+      toolCalls: [],
+      explanation
+    };
+  }
+
+  _workflowExplainFormula(activeLang = 'en') {
+    let explanation = '';
+    if (activeLang === 'mr') {
+      explanation = `### 📐 दैनंदिन प्राधान्य स्कोअरिंग सूत्र (Daily Priority Scoring Formula)\n\n` +
+        `प्रोजेक्टपायलट एआय खालील नियत (deterministic) घटकांवर आधारित प्रत्येक कामाचे प्राधान्य मोजते:\n\n` +
+        `1. **प्राधान्य श्रेणी (Priority Tier):**\n` +
+        `   • \`Critical\`: **+40 pts**\n` +
+        `   • \`High\`: **+30 pts**\n` +
+        `   • \`Medium\`: **+20 pts**\n` +
+        `   • \`Low\`: **+10 pts**\n\n` +
+        `2. **दोष / बग निकड (Bug Urgency):**\n` +
+        `   • वापरकर्त्याने नोंदवलेला बग (\`isBug\`): **+15 pts**\n\n` +
+        `3. **मुदत निकड (Due Date Urgency):**\n` +
+        `   • मुदत उलटून गेलेली (Overdue): **+25 pts**\n` +
+        `   • 24 तासांच्या आत पूर्ण करावयाचे: **+20 pts**\n` +
+        `   • 2 ते 3 दिवसांत: **+10 pts**\n` +
+        `   • 4 ते 7 दिवसांत: **+5 pts**\n\n` +
+        `4. **मूळ प्रकल्प स्थिती (Parent Project Context):**\n` +
+        `   • सक्रिय प्रकल्प (Active): **+10 pts**\n` +
+        `   • नियोजन टप्पा (Planning): **+5 pts**\n` +
+        `   • थांबवलेला प्रकल्प (Paused): **-10 pts**\n` +
+        `   • मूळ प्रकल्प Critical असल्यास: **+10 pts**\n\n` +
+        `5. **सध्या सुरू असलेले काम (In Progress):** **+8 pts**\n\n` +
+        `6. **अडथळा वजावट (Blocker Penalty):** **-20 pts** (अडथळा असलेली कामे आधी सोडवणे आवश्यक असल्याने त्यांना कमी क्रमवारी दिली जाते)\n\n` +
+        `7. **टाय-ब्रेकिंग (Deterministic Tie-Breaking):**\n` +
+        `   • जवळची मुदत तारीख (Earliest due date)\n` +
+        `   • स्थिर टास्क आयडी (Task ID alphabetical order)\n\n` +
+        `*पद्धती सूत्र:* \`priority tier + due date proximity + bug urgency + project status - blockers (tie-breakers: due date, task ID)\`.`;
+    } else if (activeLang === 'hi') {
+      explanation = `### 📐 दैनिक प्राथमिकता स्कोरिंग फॉर्मूला (Daily Priority Scoring Formula)\n\n` +
+        `प्रोजेक्टपायलट एआई निम्नलिखित नियत (deterministic) घटकों के आधार पर कार्यों की प्राथमिकता निर्धारित करता है:\n\n` +
+        `1. **प्राथमिकता स्तर (Priority Tier):** Critical (+40), High (+30), Medium (+20), Low (+10)\n` +
+        `2. **बग तात्कालिकता (Bug Urgency):** \`isBug\` (+15 pts)\n` +
+        `3. **नियत तिथि (Due Date Urgency):** Overdue (+25), 24h (+20), 2-3 दिन (+10), 4-7 दिन (+5)\n` +
+        `4. **परियोजना स्थिति (Project Context):** Active (+10), Planning (+5), Paused (-10), Critical Parent (+10)\n` +
+        `5. **प्रगतिरत कार्य (In Progress):** +8 pts\n` +
+        `6. **अवरोध कटौती (Blocker Penalty):** -20 pts\n` +
+        `7. **टाई-ब्रेकिंग:** निकटतम नियत तिथि एवं टास्क आईडी क्रम।\n\n` +
+        `*सूत्र:* \`priority tier + due date proximity + bug urgency + project status - blockers (tie-breakers: due date, task ID)\`.`;
+    } else {
+      explanation = `### 📐 Daily Priority Scoring Formula\n\n` +
+        `ProjectPilot AI calculates task recommendations using a deterministic, transparent scoring model:\n\n` +
+        `1. **Explicit Priority Tier:**\n` +
+        `   • \`Critical\`: **+40 pts**\n` +
+        `   • \`High\`: **+30 pts**\n` +
+        `   • \`Medium\`: **+20 pts**\n` +
+        `   • \`Low\`: **+10 pts**\n\n` +
+        `2. **Defect / Bug Urgency:**\n` +
+        `   • User-reported defect (\`isBug\`): **+15 pts**\n\n` +
+        `3. **Due Date Proximity:**\n` +
+        `   • Overdue: **+25 pts**\n` +
+        `   • Due within 24 hours: **+20 pts**\n` +
+        `   • Due within 2–3 days: **+10 pts**\n` +
+        `   • Due within 4–7 days: **+5 pts**\n\n` +
+        `4. **Project Status & Context:**\n` +
+        `   • Active project: **+10 pts**\n` +
+        `   • Planning project: **+5 pts**\n` +
+        `   • Paused project: **-10 pts**\n` +
+        `   • Parent project is Critical priority: **+10 pts**\n\n` +
+        `5. **Work In Progress:**\n` +
+        `   • Already in progress: **+8 pts**\n\n` +
+        `6. **Blocker Consideration:**\n` +
+        `   • Active blocker penalty: **-20 pts** (penalizes blocked tasks so executable tasks take immediate priority)\n\n` +
+        `7. **Deterministic Tie-Breaking:**\n` +
+        `   • Secondary: Earliest due date proximity\n` +
+        `   • Tertiary: Lexicographical task ID\n\n` +
+        `*Methodology:* \`priority tier + due date proximity + bug urgency + project status - blockers (tie-breakers: due date, task ID)\`.`;
+    }
+
+    return {
+      workflow: 'explain_formula',
+      toolCalls: [],
+      explanation
+    };
+  }
+
+  _workflowExplainConcept(concept = 'mcp', activeLang = 'en') {
+    let explanation = '';
+    if (concept === 'streamable_http') {
+      explanation = `### 🌐 Model Context Protocol (MCP) Streamable HTTP Transport\n\n` +
+        `**Streamable HTTP** is the modern remote transport specification (2025-11-25) for MCP:\n\n` +
+        `• **Bi-directional JSON-RPC 2.0:** Clients send tool calls, initialization, and session termination via \`POST /mcp\`.\n` +
+        `• **Server-Sent Events (SSE):** Real-time server-to-client notifications and streaming responses are delivered via \`GET /mcp\`.\n` +
+        `• **Session Resilience:** Employs cryptographically signed session tokens (\`mcp-session-id\`) for stateless multi-instance reconstruction across serverless cloud environments.\n` +
+        `• **Security & Isolation:** Incorporates bearer token authentication, CORS origin allowlists, abuse rate limiting, and fail-closed durable revocation.`;
+    } else if (concept === 'architecture') {
+      explanation = `### 🏗️ ProjectPilot AI Architecture Overview\n\n` +
+        `ProjectPilot AI is engineered as an autonomous operations assistant for developers:\n\n` +
+        `1. **MCP Streamable HTTP Gateway:** 12 unified project operations tools exposed over standard MCP 2025-11-25 protocols.\n` +
+        `2. **Natural Intelligence Pipeline:** 100% deterministic, offline NLU with language detection (EN/HI/MR), spelling normalization, context memory, and intent routing without external LLM latency.\n` +
+        `3. **Domain Intelligence Services:** Truthful health evaluation, blocker-aware priority ranking, and proactive maintenance tracking.\n` +
+        `4. **Serverless Persistence:** Dual-engine storage with local JSON fallback and Upstash Redis durable persistence.`;
+    } else {
+      // Default: MCP concept
+      explanation = `### 🔌 Model Context Protocol (MCP) in Simple English\n\n` +
+        `The **Model Context Protocol (MCP)** is an open, standardized protocol created to connect AI assistants with software tools, databases, and development environments.\n\n` +
+        `• **Why it exists:** Before MCP, every AI tool required custom integrations. MCP creates a universal standard, like USB-C for AI applications.\n` +
+        `• **Key Capabilities:**\n` +
+        `  1. **Tool Discovery:** AI assistants discover available actions (e.g. \`list_projects\`, \`inspect_github_repo\`, \`get_priority_recommendations\`).\n` +
+        `  2. **Safe Tool Calling:** Assistants execute operations with strict argument validation and safety controls.\n` +
+        `  3. **Context Sharing:** Provides real-time project metrics, health, and blockers directly to the assistant.\n` +
+        `• **How ProjectPilot Uses It:** ProjectPilot AI runs as an MCP Server gateway, enabling assistants to audit repositories, manage tasks, and resolve blockers transparently.`;
+    }
+
+    return {
+      workflow: 'explain_concept',
+      toolCalls: [],
+      explanation
+    };
+  }
+
+  async _workflowFindTask(text, activeLang = 'en') {
+    const toolCalls = [];
+    const tasksRes = await this.mcpClient.callTool('list_tasks', {});
+    toolCalls.push({
+      name: 'list_tasks',
+      args: {},
+      result: tasksRes.data
+    });
+
+    const tasks = tasksRes.data?.tasks || [];
+    const extracted = this.intentClassifier._extractTaskSearchQuery(text.toLowerCase());
+    const rawSearch = extracted !== undefined ? extracted : text;
+    const cleanSearch = rawSearch.trim().toLowerCase();
+
+    // If query was generic like "find a task by its title" without title
+    if (
+      !cleanSearch ||
+      cleanSearch === 'by its title' ||
+      cleanSearch === 'by title' ||
+      cleanSearch === 'title' ||
+      cleanSearch === 'find a task by its title' ||
+      cleanSearch === 'find task by its title'
+    ) {
+      return {
+        workflow: 'find_task',
+        toolCalls,
+        explanation: 'Please provide the task title or identifier you would like to search for. For example: "Find task Fix checkout payment gateway failure" or "Find task task-devpulse-db".'
+      };
+    }
+
+    // Match exact, substring, or ID
+    const matches = tasks.filter(t => {
+      const titleLower = (t.title || '').toLowerCase();
+      const idLower = (t.id || '').toLowerCase();
+      return titleLower === cleanSearch || idLower === cleanSearch || titleLower.includes(cleanSearch) || cleanSearch.includes(titleLower);
+    });
+
+    if (matches.length === 0) {
+      return {
+        workflow: 'find_task',
+        toolCalls,
+        explanation: `No task matching "${rawSearch.trim()}" was found in your registered projects.`
+      };
+    }
+
+    let explanation = `Found **${matches.length}** matching task(s) in registered projects:\n\n`;
+    matches.forEach((t, idx) => {
+      explanation += `**${idx + 1}. [${(t.priority || 'medium').toUpperCase()}] ${t.title}** (\`${t.id}\`)\n`;
+      explanation += `   • **Project:** \`${t.projectId}\` | **Status:** ${t.status}\n`;
+      if (t.dueDate) explanation += `   • **Due Date:** ${t.dueDate}\n`;
+      if (t.blocker) explanation += `   • **Blocker:** ⚠️ ${t.blocker}\n`;
+      explanation += '\n';
+    });
+
+    return {
+      workflow: 'find_task',
       toolCalls,
       explanation
     };
@@ -1024,7 +1479,7 @@ You can ask me to:
     });
 
     const projects = projectsRes.data?.projects || [];
-    const langInfo = this.languageDetector.detect(rawText);
+    const langInfo = this.languageDetector.detect(rawText, this.memory.preferredLanguage);
     const lang = preferredLang || (langInfo.language !== 'en' ? langInfo.language : this.memory.preferredLanguage) || 'en';
 
     // Resolve project using the multi-tier deterministic matching engine
@@ -1153,7 +1608,7 @@ You can ask me to:
         details: p,
         health,
         blockers,
-        tasks: detailsRes.data?.tasks || [],
+        tasks: detailsRes.data?.project?.tasks || [],
         language: 'mr'
       });
       return {
@@ -1169,7 +1624,7 @@ You can ask me to:
         details: p,
         health,
         blockers,
-        tasks: detailsRes.data?.tasks || [],
+        tasks: detailsRes.data?.project?.tasks || [],
         language: 'hi'
       });
       return {
@@ -1527,6 +1982,142 @@ You can ask me to:
       toolCalls,
       explanation
     };
+  }
+
+  /**
+   * Workflow: Cross-Project Blocked Tasks Review
+   * Retrieves and formats all currently blocked tasks across projects.
+   */
+  async _workflowBlockerReview(activeLang = 'en') {
+    const toolCalls = [];
+    try {
+      const blockersRes = await this.mcpClient.callTool('list_blockers', {});
+      toolCalls.push({
+        name: 'list_blockers',
+        args: {},
+        result: blockersRes.data
+      });
+
+      const blockers = blockersRes.data?.blockers || [];
+
+      if (blockers.length === 0) {
+        return {
+          workflow: 'blocker_review',
+          toolCalls,
+          explanation: `✅ **No Active Blockers Found**\n\nAll tasks across all projects are free of reported impediments.`
+        };
+      }
+
+      let explanation = `### 🛑 Active Blocked Tasks (${blockers.length} identified)\n\n`;
+      blockers.forEach((b, index) => {
+        const title = b.taskTitle || b.title || 'Untitled Task';
+        const id = b.taskId || b.id || 'N/A';
+        const project = b.projectName || b.projectId || 'Unknown Project';
+        const priority = (b.priority || 'medium').toUpperCase();
+        const reason = b.blockerReason || b.blocker || 'Status set to blocked without explicit detail';
+
+        explanation += `${index + 1}. **${title}** (\`${id}\`)\n` +
+          `   • **Project:** ${project}\n` +
+          `   • **Priority Rating:** ${priority}\n` +
+          `   • **Blocker Reason:** ${reason}\n\n`;
+      });
+
+      return {
+        workflow: 'blocker_review',
+        toolCalls,
+        explanation: explanation.trim()
+      };
+    } catch (err) {
+      return {
+        workflow: 'blocker_review',
+        toolCalls,
+        explanation: `⚠️ Failed to retrieve active blockers: ${err.message}`
+      };
+    }
+  }
+
+  /**
+   * Workflow: Overdue Tasks Query
+   * Identifies all incomplete tasks whose deadlines have elapsed across projects.
+   */
+  async _workflowOverdueTasks(activeLang = 'en') {
+    const toolCalls = [];
+    try {
+      // Step 1: List all tasks
+      const tasksRes = await this.mcpClient.callTool('list_tasks', {});
+      toolCalls.push({
+        name: 'list_tasks',
+        args: {},
+        result: tasksRes.data
+      });
+
+      // Step 2: List projects for project name mapping
+      const projectsRes = await this.mcpClient.callTool('list_projects', {});
+      toolCalls.push({
+        name: 'list_projects',
+        args: {},
+        result: projectsRes.data
+      });
+
+      const tasks = tasksRes.data?.tasks || [];
+      const projects = projectsRes.data?.projects || [];
+      const projMap = new Map(projects.map(p => [p.id, p]));
+
+      const now = new Date();
+
+      // Filter overdue tasks:
+      // Exclude tasks with status 'done' or 'completed'
+      // Exclude tasks without dueDate or with invalid dueDate
+      // Must be due < now
+      const overdueTasks = tasks.filter(t => {
+        if (!t.dueDate) return false;
+        if (t.status === 'done' || t.status === 'completed') return false;
+        const due = new Date(t.dueDate);
+        if (isNaN(due.getTime())) return false;
+        return due.getTime() < now.getTime();
+      });
+
+      if (overdueTasks.length === 0) {
+        return {
+          workflow: 'overdue_tasks',
+          toolCalls,
+          explanation: `✅ **No Overdue Tasks Found**\n\nAll tasks with deadlines are on schedule or already completed.`
+        };
+      }
+
+      // Sort by overdue duration (oldest due first)
+      overdueTasks.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+
+      let explanation = `### ⚠️ Overdue Tasks (${overdueTasks.length} past deadline)\n\n`;
+      overdueTasks.forEach((t, index) => {
+        const project = projMap.get(t.projectId);
+        const projectName = project ? project.name : (t.projectId || 'Unknown Project');
+        const due = new Date(t.dueDate);
+        const diffMs = now.getTime() - due.getTime();
+        const daysOverdue = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        const priority = (t.priority || 'medium').toUpperCase();
+        const status = (t.status || 'todo').toUpperCase();
+        const blockerInfo = t.blocker ? `\n   • **Blocker:** ${t.blocker}` : '';
+
+        explanation += `${index + 1}. **${t.title}** (\`${t.id}\`)\n` +
+          `   • **Project:** ${projectName}\n` +
+          `   • **Due Date:** ${due.toISOString().split('T')[0]} (${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue)\n` +
+          `   • **Status:** ${status}\n` +
+          `   • **Priority:** ${priority}${blockerInfo}\n\n`;
+      });
+
+      return {
+        workflow: 'overdue_tasks',
+        toolCalls,
+        explanation: explanation.trim()
+      };
+    } catch (err) {
+      return {
+        workflow: 'overdue_tasks',
+        toolCalls,
+        explanation: `⚠️ Failed to retrieve project tasks: ${err.message}`
+      };
+    }
   }
 
   // =============================================================
@@ -2310,23 +2901,16 @@ You can ask me to:
         result: inspectRes.data
       });
     } catch (err) {
-      try {
-        const { GitHubService } = await import('../../src/services/githubService.js');
-        const gh = new GitHubService();
-        const fallbackReport = await gh.inspectRepository(repoUrl);
-        inspectRes = { data: fallbackReport };
-        toolCalls.push({
-          name: 'inspect_github_repo',
-          args: { repoUrl },
-          result: fallbackReport
-        });
-      } catch (innerErr) {
-        return {
-          workflow: 'github_repo_inspection',
-          toolCalls,
-          explanation: `⚠️ GitHub repository inspection error: ${err.message}`
-        };
-      }
+      toolCalls.push({
+        name: 'inspect_github_repo',
+        args: { repoUrl },
+        error: err.message
+      });
+      return {
+        workflow: 'github_repo_inspection',
+        toolCalls,
+        explanation: `⚠️ GitHub repository inspection error: ${err.message}`
+      };
     }
 
     const report = inspectRes?.data;
