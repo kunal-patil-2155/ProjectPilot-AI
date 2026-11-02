@@ -31,6 +31,31 @@ import {
 } from './security/sessionManager.js';
 
 /**
+ * Sanitizes sensitive credentials (Bearer tokens, passwords, keys, secrets) from text before logging.
+ * @param {string} text
+ * @returns {string}
+ */
+export function sanitizeLogText(text) {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/(Bearer\s+)[A-Za-z0-9_\-.~+/]+=*/gi, '$1[REDACTED]')
+    .replace(/([?&](?:token|key|secret|password)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/(["']?(?:token|apiKey|secret|password|authorization)["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[REDACTED]')
+    .replace(/(https?:\/\/[^:]+:)[^@]+(@)/gi, '$1[REDACTED]$2');
+}
+
+/**
+ * Server-side error logger that redacts secrets and prints stack trace for observability.
+ * @param {string} prefix
+ * @param {Error|any} err
+ */
+export function logSanitizedError(prefix, err) {
+  const message = err?.message ? sanitizeLogText(String(err.message)) : 'Unknown error';
+  const stack = err?.stack ? sanitizeLogText(String(err.stack)) : '';
+  console.error(prefix, message, stack ? `\nStack: ${stack}` : '');
+}
+
+/**
  * Safely reconstructs an MCP Streamable HTTP transport for an authenticated, verified session.
  * Includes defensive compatibility guards for underlying SDK transport internals.
  *
@@ -147,9 +172,45 @@ export async function createServer(options = {}) {
     : path.resolve(__dirname, '..', 'data', 'store.json');
   const storePath = options.storePath || defaultStorePath;
 
+  // Judge Demo Mode: automatically enabled in serverless environments (Vercel), via JUDGE_DEMO_MODE=true, or options.judgeDemoMode.
+  // Explicit JUDGE_DEMO_MODE=false disables it even on Vercel.
+  const judgeDemoMode = options.judgeDemoMode !== undefined
+    ? Boolean(options.judgeDemoMode)
+    : (process.env.JUDGE_DEMO_MODE === 'false' ? false : (process.env.JUDGE_DEMO_MODE === 'true' || Boolean(process.env.VERCEL)));
+
   let store;
   if (options.store) {
     store = options.store;
+  } else if (options.storePath) {
+    // Explicit storePath provided (e.g. tests or explicit file override)
+    store = await createStore({
+      ...options,
+      storePath,
+      isProduction
+    });
+  } else if (judgeDemoMode && process.env.REQUIRE_DURABLE_STORAGE !== 'true') {
+    // In Judge Demo Mode: demo sessions execute strictly against isolated in-memory DemoSandboxStores.
+    // Persistent storage is only initialized if Upstash is fully configured and reachable;
+    // otherwise, Judge Demo Mode initializes cleanly without connecting to Upstash.
+    const hasUpstashConfig = Boolean(
+      (options.url || options.upstashUrl || process.env.UPSTASH_REDIS_REST_URL) &&
+      (options.token || options.upstashToken || process.env.UPSTASH_REDIS_REST_TOKEN)
+    );
+
+    if (hasUpstashConfig) {
+      try {
+        store = await createStore({
+          ...options,
+          storePath,
+          isProduction
+        });
+      } catch (upstashInitErr) {
+        logSanitizedError('Judge Demo Mode: Upstash persistence connection failed; falling back to in-memory sandbox store:', upstashInitErr);
+        store = new DemoSandboxStore();
+      }
+    } else {
+      store = new DemoSandboxStore();
+    }
   } else {
     // On serverless environments (e.g. Vercel) using local file fallback, copy seed data if needed
     if (process.env.VERCEL && !fs.existsSync(storePath) && !process.env.UPSTASH_REDIS_REST_URL && !options.url && !options.upstashUrl) {
@@ -180,11 +241,6 @@ export async function createServer(options = {}) {
   const apiKey = options.apiKey !== undefined
     ? options.apiKey
     : (process.env.MCP_API_KEY ? String(process.env.MCP_API_KEY).trim() : null);
-
-  // Judge Demo Mode: automatically enabled in serverless environments (Vercel), via JUDGE_DEMO_MODE=true, or options.judgeDemoMode
-  const judgeDemoMode = options.judgeDemoMode !== undefined
-    ? Boolean(options.judgeDemoMode)
-    : (process.env.JUDGE_DEMO_MODE === 'true' || Boolean(process.env.VERCEL));
 
   // CORS origins: configured via options.allowedOrigins or ALLOWED_ORIGINS environment variable
   const envOrigins = process.env.ALLOWED_ORIGINS
@@ -514,8 +570,10 @@ export async function createServer(options = {}) {
         const toolName = parsedBody?.params?.name;
         const isMutating = isToolCall && MUTATING_TOOL_NAMES.has(toolName);
 
-        // Security Guard 1: In production without durable persistence, refuse mutating operations
-        if (isProduction && !isDurable && isMutating) {
+        const isDemoSession = auth.isDemo || (judgeDemoMode && !auth.authenticated);
+
+        // Security Guard 1: In production without durable persistence, refuse mutating operations on persistent storage
+        if (isProduction && !isDurable && isMutating && !isDemoSession) {
           res.writeHead(503, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             jsonrpc: '2.0',
@@ -528,8 +586,8 @@ export async function createServer(options = {}) {
           return;
         }
 
-        // Security Guard 2: In production without configured key, refuse mutating operations
-        if (isProduction && !apiKey && isMutating) {
+        // Security Guard 2: In production without configured key, refuse mutating operations on persistent storage
+        if (isProduction && !apiKey && isMutating && !isDemoSession) {
           res.writeHead(401, {
             'Content-Type': 'application/json',
             'WWW-Authenticate': 'Bearer realm="ProjectPilot MCP Gateway"'
@@ -546,7 +604,7 @@ export async function createServer(options = {}) {
         }
 
         // Security Guard 3: In Judge Demo Mode, administrative mutating operations require master API key
-        if (isMutating && !auth.authenticated) {
+        if (isMutating && isDemoSession) {
           if (ADMINISTRATIVE_MUTATING_TOOLS.has(toolName)) {
             res.writeHead(401, {
               'Content-Type': 'application/json',
@@ -564,7 +622,6 @@ export async function createServer(options = {}) {
           }
         }
 
-        const isDemoSession = !auth.authenticated;
         let transport;
         if (sessionId) {
           try {
@@ -987,6 +1044,7 @@ export default async function handler(req, res) {
   try {
     instance = await getOrInitServer();
   } catch (initErr) {
+    logSanitizedError('Serverless initialization failed:', initErr);
     if (!res.headersSent) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
