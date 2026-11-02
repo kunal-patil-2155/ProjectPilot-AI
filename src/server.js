@@ -11,9 +11,15 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import crypto, { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ProjectStore, createStore } from './db/store.js';
+import { ProjectStore, createStore, DemoSandboxStore } from './db/store.js';
 import { UpstashRedisStore } from './db/upstashStore.js';
-import { createProjectPilotMcpServer, MUTATING_TOOL_NAMES } from './mcp/server.js';
+import {
+  createProjectPilotMcpServer,
+  MUTATING_TOOL_NAMES,
+  DEMO_ALLOWED_MUTATIONS,
+  ADMINISTRATIVE_MUTATING_TOOLS,
+  DESTRUCTIVE_TOOL_NAMES
+} from './mcp/server.js';
 import { RateLimiter } from './security/rateLimiter.js';
 import {
   SessionManager,
@@ -62,6 +68,7 @@ export async function reconstructMcpTransport(sid, store, options = {}, auth = {
       : (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)),
     isDurable: options.isDurable,
     authenticated: auth.authenticated,
+    isDemo: options.isDemo !== undefined ? options.isDemo : !auth.authenticated,
     apiKey: options.apiKey
   });
   await mcpServer.connect(reconstructed);
@@ -70,6 +77,11 @@ export async function reconstructMcpTransport(sid, store, options = {}, auth = {
 }
 
 export {
+  DemoSandboxStore,
+  MUTATING_TOOL_NAMES,
+  DEMO_ALLOWED_MUTATIONS,
+  ADMINISTRATIVE_MUTATING_TOOLS,
+  DESTRUCTIVE_TOOL_NAMES,
   SessionManager,
   createSignedSessionId,
   verifySignedSessionId,
@@ -169,6 +181,11 @@ export async function createServer(options = {}) {
     ? options.apiKey
     : (process.env.MCP_API_KEY ? String(process.env.MCP_API_KEY).trim() : null);
 
+  // Judge Demo Mode: automatically enabled in serverless environments (Vercel), via JUDGE_DEMO_MODE=true, or options.judgeDemoMode
+  const judgeDemoMode = options.judgeDemoMode !== undefined
+    ? Boolean(options.judgeDemoMode)
+    : (process.env.JUDGE_DEMO_MODE === 'true' || Boolean(process.env.VERCEL));
+
   // CORS origins: configured via options.allowedOrigins or ALLOWED_ORIGINS environment variable
   const envOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
@@ -225,6 +242,20 @@ export async function createServer(options = {}) {
   });
   // Maintain backward-compatible reference to local sessions Map
   const sessions = sessionManager.sessions;
+
+  // Isolated in-memory demo sandbox stores for Judge Demo Mode: sessionId -> DemoSandboxStore
+  const demoStores = new Map();
+
+  function getOrCreateDemoStore(sessionId = null) {
+    if (sessionId && demoStores.has(sessionId)) {
+      return demoStores.get(sessionId);
+    }
+    const demoStore = new DemoSandboxStore();
+    if (sessionId) {
+      demoStores.set(sessionId, demoStore);
+    }
+    return demoStore;
+  }
 
   /**
    * Determine allowed CORS origin based on request headers and configuration.
@@ -293,6 +324,7 @@ export async function createServer(options = {}) {
    */
   function authenticateRequest(req) {
     const authHeader = req.headers['authorization'];
+    const isRequestDemo = judgeDemoMode || req.headers['x-judge-demo'] === 'true';
     let token = null;
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -302,31 +334,53 @@ export async function createServer(options = {}) {
     }
 
     if (apiKey) {
-      if (!token) {
+      if (authHeader !== undefined || req.headers['x-api-key'] !== undefined) {
+        if (!token) {
+          return {
+            authenticated: false,
+            status: 401,
+            message: 'Authentication required: missing Bearer token or x-api-key header'
+          };
+        }
+
+        if (!secureCompareTokens(token, apiKey)) {
+          return {
+            authenticated: false,
+            status: 401,
+            message: 'Authentication failed: invalid API key'
+          };
+        }
+
+        return { authenticated: true };
+      }
+
+      // No credentials provided
+      if (isRequestDemo) {
         return {
           authenticated: false,
-          status: 401,
-          message: 'Authentication required: missing Bearer token or x-api-key header'
+          isDemo: true
         };
       }
 
-      if (!secureCompareTokens(token, apiKey)) {
-        return {
-          authenticated: false,
-          status: 401,
-          message: 'Authentication failed: invalid API key'
-        };
-      }
-
-      return { authenticated: true };
+      return {
+        authenticated: false,
+        status: 401,
+        message: 'Authentication required: missing Bearer token or x-api-key header'
+      };
     }
 
     if (isProduction) {
       return {
         authenticated: false,
         noKeyInProduction: true,
-        status: 401,
         message: 'Authentication required: MCP_API_KEY must be configured in production for mutating operations.'
+      };
+    }
+
+    if (judgeDemoMode && (authHeader === undefined && req.headers['x-api-key'] === undefined)) {
+      return {
+        authenticated: false,
+        isDemo: true
       };
     }
 
@@ -334,8 +388,9 @@ export async function createServer(options = {}) {
   }
 
   const httpServer = http.createServer(async (req, res) => {
-    const forwarded = req.headers['x-forwarded-for'];
-    const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null) || req.socket?.remoteAddress || '127.0.0.1';
+    try {
+      const forwarded = req.headers['x-forwarded-for'];
+      const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null) || req.socket?.remoteAddress || '127.0.0.1';
 
     // 1. Rate Limiting Check
     const rateCheck = rateLimiter.isAllowed(clientIp);
@@ -387,7 +442,7 @@ export async function createServer(options = {}) {
 
       // A. Authentication Verification
       const auth = authenticateRequest(req);
-      if (apiKey && !auth.authenticated) {
+      if (auth.status === 401) {
         res.writeHead(401, {
           'Content-Type': 'application/json',
           'WWW-Authenticate': 'Bearer realm="ProjectPilot MCP Gateway"'
@@ -490,21 +545,46 @@ export async function createServer(options = {}) {
           return;
         }
 
+        // Security Guard 3: In Judge Demo Mode, administrative mutating operations require master API key
+        if (isMutating && !auth.authenticated) {
+          if (ADMINISTRATIVE_MUTATING_TOOLS.has(toolName)) {
+            res.writeHead(401, {
+              'Content-Type': 'application/json',
+              'WWW-Authenticate': 'Bearer realm="ProjectPilot MCP Gateway"'
+            });
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32000,
+                message: `Authentication required: missing Bearer token or x-api-key header. Administrative operation '${toolName}' is restricted in Judge Demo Mode. Master API key required.`
+              },
+              id: parsedBody?.id || null
+            }));
+            return;
+          }
+        }
+
+        const isDemoSession = !auth.authenticated;
         let transport;
         if (sessionId) {
           try {
             transport = await sessionManager.resolveTransport(sessionId, async (sid) => {
-              const reconstructed = await reconstructMcpTransport(sid, store, {
+              const sessionStore = isDemoSession ? getOrCreateDemoStore(sid) : store;
+              const reconstructed = await reconstructMcpTransport(sid, sessionStore, {
                 enableExtended: options.enableExtended !== undefined
                   ? options.enableExtended
                   : (process.env.PROJECTPILOT_EXTENDED_TOOLS === 'true'),
                 isProduction,
-                isDurable,
+                isDurable: isDemoSession ? false : isDurable,
+                isDemo: isDemoSession,
                 apiKey
               }, auth);
 
               reconstructed.onclose = () => {
                 sessionManager.deleteLocal(sid);
+                if (isDemoSession) {
+                  demoStores.delete(sid);
+                }
               };
               return reconstructed;
             });
@@ -537,17 +617,19 @@ export async function createServer(options = {}) {
         } else {
           // Initialize a new stateful MCP transport session with signed token
           const newSessionId = sessionManager.generateSessionId();
+          const sessionStore = isDemoSession ? getOrCreateDemoStore(newSessionId) : store;
           transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => newSessionId,
             enableJsonResponse: true
           });
-          const mcpServer = createProjectPilotMcpServer(store, {
+          const mcpServer = createProjectPilotMcpServer(sessionStore, {
             enableExtended: options.enableExtended !== undefined
               ? options.enableExtended
               : (process.env.PROJECTPILOT_EXTENDED_TOOLS === 'true'),
             isProduction,
-            isDurable,
+            isDurable: isDemoSession ? false : isDurable,
             authenticated: auth.authenticated,
+            isDemo: isDemoSession,
             apiKey
           });
           await mcpServer.connect(transport);
@@ -555,6 +637,9 @@ export async function createServer(options = {}) {
           transport.onclose = () => {
             if (transport.sessionId) {
               sessionManager.deleteLocal(transport.sessionId);
+              if (isDemoSession) {
+                demoStores.delete(transport.sessionId);
+              }
             }
           };
         }
@@ -584,20 +669,26 @@ export async function createServer(options = {}) {
           return;
         }
 
+        const isDemoSession = !auth.authenticated;
         let transport;
         try {
           transport = await sessionManager.resolveTransport(sessionId, async (sid) => {
-            const reconstructed = await reconstructMcpTransport(sid, store, {
+            const sessionStore = isDemoSession ? getOrCreateDemoStore(sid) : store;
+            const reconstructed = await reconstructMcpTransport(sid, sessionStore, {
               enableExtended: options.enableExtended !== undefined
                 ? options.enableExtended
                 : (process.env.PROJECTPILOT_EXTENDED_TOOLS === 'true'),
               isProduction,
-              isDurable,
+              isDurable: isDemoSession ? false : isDurable,
+              isDemo: isDemoSession,
               apiKey
             }, auth);
 
             reconstructed.onclose = () => {
               sessionManager.deleteLocal(sid);
+              if (isDemoSession) {
+                demoStores.delete(sid);
+              }
             };
             return reconstructed;
           });
@@ -670,7 +761,10 @@ export async function createServer(options = {}) {
 
     // 4. Diagnostic & Health Endpoint (Discloses operational stats, no secrets)
     if (pathname === '/api/info' || pathname === '/api' || pathname === '/api/') {
-      if (typeof store.sync === 'function') {
+      const auth = authenticateRequest(req);
+      const isDemo = !auth.authenticated;
+      const targetStore = isDemo ? getOrCreateDemoStore() : store;
+      if (!isDemo && typeof store.sync === 'function') {
         await store.sync().catch(() => {});
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -683,11 +777,12 @@ export async function createServer(options = {}) {
         storageBackend: isDurable ? 'upstash_redis' : 'local_json',
         isDurable,
         isProduction,
+        judgeDemoMode: true,
         activeMcpSessions: sessions.size,
         dataStats: {
-          projects: store.listProjects().length,
-          tasks: store.listTasks().length,
-          blockers: store.listBlockers().length
+          projects: targetStore.listProjects().length,
+          tasks: targetStore.listTasks().length,
+          blockers: targetStore.listBlockers().length
         }
       }, null, 2));
       return;
@@ -745,7 +840,16 @@ export async function createServer(options = {}) {
             const ext = path.extname(indexFile);
             res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
             if (req.method === 'HEAD') { res.end(); return; }
-            fs.createReadStream(indexFile).pipe(res);
+            const stream = fs.createReadStream(indexFile);
+            stream.on('error', () => {
+              if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Internal Server Error');
+              } else if (!res.writableEnded) {
+                res.end();
+              }
+            });
+            stream.pipe(res);
             return;
           }
         } else if (stat.isFile()) {
@@ -755,7 +859,16 @@ export async function createServer(options = {}) {
             'Content-Length': stat.size
           });
           if (req.method === 'HEAD') { res.end(); return; }
-          fs.createReadStream(safePath).pipe(res);
+          const stream = fs.createReadStream(safePath);
+          stream.on('error', () => {
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' });
+              res.end('Internal Server Error');
+            } else if (!res.writableEnded) {
+              res.end();
+            }
+          });
+          stream.pipe(res);
           return;
         }
       } catch (err) {
@@ -772,6 +885,17 @@ export async function createServer(options = {}) {
 
     res.writeHead(405, { 'Content-Type': 'text/plain' });
     res.end('Method Not Allowed');
+    } catch (unhandledErr) {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'Internal Server Error',
+          message: 'An unexpected server error occurred.'
+        }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    }
   });
 
   return {
@@ -802,17 +926,116 @@ let defaultServerInstance = null;
 let defaultServerPromise = null;
 
 /**
+ * Safely retrieves or initializes the singleton server instance for serverless handlers.
+ * Guarantees single-instance initialization under concurrent requests and
+ * provides robust rejection recovery so a failed initialization attempt does not
+ * permanently poison container memory.
+ *
+ * @param {Object} [options]
+ * @returns {Promise<any>}
+ */
+export async function getOrInitServer(options = {}) {
+  if (defaultServerInstance) {
+    return defaultServerInstance;
+  }
+
+  if (!defaultServerPromise) {
+    const currentPromise = createServer(options);
+    defaultServerPromise = currentPromise;
+
+    currentPromise
+      .then((instance) => {
+        defaultServerInstance = instance;
+      })
+      .catch((_err) => {
+        // Reset cached promise only if it is still this exact failed attempt.
+        // Prevents a late failure from clearing a newer successful or in-progress attempt.
+        if (defaultServerPromise === currentPromise) {
+          defaultServerPromise = null;
+        }
+      });
+  }
+
+  try {
+    const instance = await defaultServerPromise;
+    defaultServerInstance = instance;
+    return instance;
+  } catch (err) {
+    if (defaultServerPromise) {
+      defaultServerPromise.catch(() => {});
+    }
+    throw err;
+  }
+}
+
+/**
+ * Helper for test isolation to reset the cached serverless singleton.
+ */
+export function _resetServerlessInstanceForTest() {
+  defaultServerInstance = null;
+  defaultServerPromise = null;
+}
+
+/**
  * Serverless request handler for environments like Vercel.
- * Lazily initializes and caches a single HTTP server instance.
+ * Lazily initializes and caches a single HTTP server instance,
+ * and ensures the serverless execution context remains active
+ * until the HTTP response lifecycle has fully completed.
  */
 export default async function handler(req, res) {
-  if (!defaultServerInstance) {
-    if (!defaultServerPromise) {
-      defaultServerPromise = createServer();
+  let instance;
+  try {
+    instance = await getOrInitServer();
+  } catch (initErr) {
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'Initialization Error',
+        message: 'Server failed to initialize due to configuration or persistence error.'
+      }));
     }
-    defaultServerInstance = await defaultServerPromise;
+    return;
   }
-  defaultServerInstance.server.emit('request', req, res);
+
+  if (res.writableEnded || res.finished) {
+    return;
+  }
+
+  await new Promise((resolve) => {
+    let settled = false;
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      res.removeListener('finish', onFinish);
+      res.removeListener('close', onClose);
+      res.removeListener('error', onError);
+      req.removeListener('error', onError);
+      resolve();
+    };
+
+    const onFinish = () => cleanup();
+    const onClose = () => cleanup();
+    const onError = (_err) => {
+      if (!res.headersSent) {
+        try {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Internal Server Error' }));
+        } catch {}
+      }
+      cleanup();
+    };
+
+    res.once('finish', onFinish);
+    res.once('close', onClose);
+    res.once('error', onError);
+    req.once('error', onError);
+
+    try {
+      instance.server.emit('request', req, res);
+    } catch (emitErr) {
+      onError(emitErr);
+    }
+  });
 }
 
 // Standalone execution entrypoint

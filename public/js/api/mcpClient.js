@@ -80,6 +80,8 @@ export class McpBrowserClient {
     }
     if (this.apiKey && !headers['Authorization'] && !headers['authorization']) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
+    } else if (!this.apiKey && !headers['Authorization']) {
+      headers['x-judge-demo'] = 'true';
     }
     return headers;
   }

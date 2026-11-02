@@ -765,3 +765,37 @@ export async function createStore(options = {}) {
   await store.init();
   return store;
 }
+
+/**
+ * Isolated in-memory sandbox store for Judge Demo Mode.
+ * Clones sample data upon instantiation; all operations occur in memory.
+ * Disk and network operations are no-ops, providing complete isolation
+ * from production and staging persistent databases.
+ */
+export class DemoSandboxStore extends ProjectStore {
+  constructor(initialData = null) {
+    super('in-memory-demo');
+    this.data = initialData ? structuredClone(initialData) : getSampleData();
+    if (!Array.isArray(this.data.auditLog)) {
+      this.data.auditLog = [];
+    }
+    this._initialized = true;
+  }
+
+  async init() {
+    this._initialized = true;
+    return this;
+  }
+
+  async _saveAtomic(newData = null) {
+    if (newData) {
+      this.data = newData;
+    }
+    return;
+  }
+
+  async sync() {
+    return;
+  }
+}
+

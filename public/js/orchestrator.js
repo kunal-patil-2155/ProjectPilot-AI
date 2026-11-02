@@ -115,10 +115,17 @@ export function isRescueIntent(text) {
     norm.startsWith('plan a rescue') ||
     norm.startsWith('plan rescue') ||
     norm.startsWith('plan recovery') ||
+    norm.startsWith('generate a rescue') ||
+    norm.startsWith('generate rescue') ||
+    norm.startsWith('generate a recovery') ||
+    norm.startsWith('generate recovery') ||
     norm.includes('rescue plan') ||
     norm.includes('recovery plan') ||
+    norm.includes('recovery strategy') ||
     norm.includes('rescue project') ||
     norm.includes('rescue the project') ||
+    norm.includes('needs a rescue plan') ||
+    norm.includes('need a rescue plan') ||
     (norm.includes('prepare') && norm.includes('rescue')) ||
     (norm.includes('investigate') && norm.includes('recovery plan')) ||
     (norm.includes('investigate') && norm.includes('rescue plan'))
@@ -159,20 +166,43 @@ export function extractRescueQuery(rawText) {
   let text = rawText.trim().replace(/[?.!,;:]+$/, '').trim();
   text = text.replace(/^(?:can\s+you\s+|could\s+you\s+|please\s+|kindly\s+)/i, '').trim();
 
+  // If text is asking which project needs a rescue plan, return empty
+  if (
+    /which\s+project\s+needs?\s+a?\s*(?:rescue|recovery)/i.test(text) ||
+    /who\s+needs?\s+a?\s*(?:rescue|recovery)/i.test(text)
+  ) {
+    return '';
+  }
+
   const patterns = [
-    /^(?:investigate(?:\s+the)?\s+risks\s+and\s+)?prepare\s+(?:a\s+)?(?:rescue|recovery)\s+plan\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
-    /^create\s+(?:a\s+)?(?:rescue|recovery)\s+plan\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
-    /^plan\s+(?:a\s+)?rescue\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^(?:investigate(?:\s+the)?\s+risks\s+and\s+)?(?:prepare|create|generate|plan)\s+(?:a\s+)?(?:rescue|recovery)\s+(?:plan|strategy)\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^(?:rescue|help\s+rescue)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
-    /^(?:rescue|recovery)\s+plan\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
+    /^(?:rescue|recovery)\s+(?:plan|strategy)\s+(?:for|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^rescue\s+(.+)$/i
   ];
 
   for (const pat of patterns) {
     const match = text.match(pat);
     if (match && match[1] && match[1].trim()) {
-      return match[1].trim();
+      const candidate = match[1].trim();
+      // If candidate is a generic phrase like "my most critical project", "critical project", "the project"
+      if (
+        /^(?:my\s+|our\s+|the\s+)?(?:most\s+)?critical\s+project$/i.test(candidate) ||
+        /^(?:my\s+|our\s+|the\s+)?project$/i.test(candidate) ||
+        /^(?:a\s+)?(?:rescue|recovery)\s+(?:plan|strategy)$/i.test(candidate)
+      ) {
+        return '';
+      }
+      return candidate;
     }
+  }
+
+  // If the command is just "generate a rescue plan" or "prepare a recovery strategy"
+  if (
+    /^(?:generate|prepare|create|plan)\s+(?:a\s+)?(?:rescue|recovery)\s+(?:plan|strategy)$/i.test(text) ||
+    /^(?:rescue|recovery)\s+(?:plan|strategy)$/i.test(text)
+  ) {
+    return '';
   }
 
   return extractProjectQuery(text);
@@ -200,6 +230,8 @@ export function isBlockerReviewIntent(text) {
     norm.includes('blocked work') ||
     norm.includes('blocked item') ||
     norm.includes('all blocker') ||
+    norm.includes('active blocker') ||
+    norm.includes('active blockers') ||
     norm.includes('all blocked') ||
     norm.includes('list blocker') ||
     norm.includes('show blocker') ||
@@ -215,6 +247,9 @@ export function isBlockerReviewIntent(text) {
     norm.includes('are there any blocked') ||
     norm.includes('any blocked tasks') ||
     norm.includes('any blockers') ||
+    norm.includes('preventing project progress') ||
+    norm.includes('preventing progress') ||
+    norm.includes('stopping progress') ||
     norm === 'blockers' ||
     norm === 'blocked tasks'
   );
@@ -314,18 +349,80 @@ export function isGreetingOrIdentityIntent(text) {
 }
 
 /**
+ * Checks whether an incoming text intends a project listing / portfolio discovery query.
+ */
+export function isProjectsListIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  // Guard against blocker/task queries
+  if (norm.includes('blocker') || norm.includes('blocked') || norm.includes('overdue') || norm.includes('task')) {
+    return false;
+  }
+  return (
+    norm.includes('all my projects') ||
+    norm.includes('all projects') ||
+    norm.includes('list projects') ||
+    norm.includes('list my projects') ||
+    norm.includes('show all projects') ||
+    norm.includes('show projects') ||
+    norm.includes('show my projects') ||
+    norm.includes('what projects are registered') ||
+    norm.includes('what projects do i have') ||
+    norm.includes('what are my projects') ||
+    norm.includes('registered projects') ||
+    norm.includes('view projects') ||
+    norm === 'projects' ||
+    norm === 'my projects' ||
+    norm.includes('sare projects') ||
+    norm.includes('sab projects') ||
+    norm.includes('sarv projects') ||
+    norm.includes('sagale projects')
+  );
+}
+
+/**
+ * Checks whether an incoming text intends a project health / risk assessment query.
+ */
+export function isProjectHealthIntent(text) {
+  const norm = normalizeIntentText(text);
+  if (!norm) return false;
+  return (
+    norm.includes('at risk') ||
+    norm.includes('at-risk') ||
+    norm.includes('needs immediate attention') ||
+    norm.includes('need immediate attention') ||
+    norm.includes('needs attention') ||
+    norm.includes('need attention') ||
+    norm.includes('unhealthy project') ||
+    norm.includes('unhealthy projects') ||
+    norm.includes('project health') ||
+    norm.includes('health of projects') ||
+    norm.includes('health of all projects') ||
+    norm.includes('which project is failing') ||
+    norm.includes('failing project') ||
+    norm.includes('projects at risk') ||
+    norm.includes('projects in danger') ||
+    norm.includes('khatre me') ||
+    norm.includes('dhokyat')
+  );
+}
+
+/**
  * Checks whether an incoming text intends a project investigation.
  */
 export function isProjectInvestigationIntent(text) {
   const norm = normalizeIntentText(text);
   if (!norm) return false;
 
-  // Exclude cross-project blocker, overdue, maintenance, and greeting/identity queries
+  // Exclude cross-project blocker, overdue, maintenance, greeting/identity, project list, health, and rescue queries
   if (
     isBlockerReviewIntent(norm) ||
     isOverdueTasksIntent(norm) ||
     isMaintenanceReviewIntent(norm) ||
-    isGreetingOrIdentityIntent(norm)
+    isGreetingOrIdentityIntent(norm) ||
+    isProjectsListIntent(norm) ||
+    isProjectHealthIntent(norm) ||
+    isRescueIntent(norm)
   ) {
     return false;
   }
@@ -382,7 +479,13 @@ export function extractProjectQuery(rawText) {
   // Strip trailing polite/filler words
   text = text.replace(/\s+(doing|please|now)$/i, '').trim();
 
-  // If input is purely a command or command + filler (e.g. "investigate project", "inspect the project", "mera project status batao")
+  // If input is purely a command or generic inquiry with no specific project name
+  const isGenericInquiry = /^(?:investigate|inspect|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|how\s+are|tell\s+me\s+about|give\s+me(?:\s+a)?(?:\s+complete)?(?:\s+project)?\s+status\s+report|give\s+me(?:\s+the)?\s+details(?:\s+about|\s+on|\s+for|\s+of)?|details|status|health)\s*(?:the\s+|my\s+|our\s+|this\s+|mera\s+|meri\s+|majha\s+|majhi\s+)?(?:project|projects)?(?:\s+progressing|\s+doing|\s+status|\s+health|\s+report)?$/i.test(text);
+
+  if (isGenericInquiry) {
+    return '';
+  }
+
   const strippedCommandOnly = text.replace(
     /^(?:investigate|inspect|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|tell\s+me\s+about|give\s+me(?:\s+the)?\s+details(?:\s+about|\s+on|\s+for|\s+of)?|details|status|health)\s+(?:the\s+|my\s+|our\s+|this\s+|mera\s+|meri\s+|majha\s+|majhi\s+)?(?:project)?$/i,
     ''
@@ -395,9 +498,10 @@ export function extractProjectQuery(rawText) {
   }
 
   const patterns = [
+    /^(?:give\s+me\s+(?:a\s+)?(?:complete\s+)?(?:project\s+)?status\s+report\s+(?:on|for|about))\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^(?:what\s+is|what's)\s+(?:the\s+)?(?:health|status|details)\s+(?:of|for|about|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^(?:what\s+is|what's)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+?)(?:\s+(?:status|health|details))?$/i,
-    /^how\s+is\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+?)(?:\s+doing)?$/i,
+    /^how\s+is\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+?)(?:\s+(?:doing|progressing))?$/i,
     /^give\s+me\s+(?:the\s+)?details\s+(?:about|on|for|of)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^tell\s+me\s+about\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
     /^show(?:\s+me)?\s+(?:the\s+)?(?:health|status|details)\s+(?:of|for|about|on)\s+(?:the\s+|my\s+|our\s+|this\s+)?(?:project\s+)?(.+)$/i,
@@ -715,10 +819,10 @@ export class AssistantOrchestrator {
     // 1. Language Detection & Preference Tracking
     const langInfo = this.languageDetector.detect(text, this.memory.preferredLanguage);
     const detectedLang = langInfo.language;
-    if (langInfo.isSwitchCommand || (detectedLang !== 'en' && langInfo.confidence >= 0.75)) {
+    if (langInfo.isSwitchCommand || langInfo.confidence >= 0.75) {
       this.memory.preferredLanguage = detectedLang;
     }
-    const activeLang = langInfo.requestedLanguage || (detectedLang !== 'en' && langInfo.confidence >= 0.75 ? detectedLang : this.memory.preferredLanguage);
+    const activeLang = langInfo.requestedLanguage || (langInfo.confidence >= 0.75 ? detectedLang : this.memory.preferredLanguage);
 
     // 2. Spelling & Typo Normalization (protecting identifiers/IDs/code)
     const normResult = this.spellingNormalizer.normalize(text);
@@ -760,7 +864,7 @@ export class AssistantOrchestrator {
         const hStatus = inv.health?.healthStatus || 'Evaluated';
         const blockers = inv.blockers || [];
         let exp = '';
-        if (activeLang === 'mr') {
+        if (activeLang === 'mr' || activeLang === 'marathiglish') {
           exp = `### 🔍 तपासणी निष्कर्ष (Investigation Findings): **${pName}**\n\n`;
           exp += `• **आरोग्य दर्जा (Health):** \`${hStatus}\`\n`;
           exp += `• **सक्रिय अडथळे (Active Blockers):** ${blockers.length}\n`;
@@ -771,7 +875,7 @@ export class AssistantOrchestrator {
           }
           exp += `\n**पडताळणी पुरावा (Verified Evidence):** डेटा थेट प्रोजेक्ट रेकॉर्डमधून तपासला आहे.\n`;
           exp += `**पुढील कृती:** हे अडथळे दूर करण्यासाठी तुम्ही "same issue fix karo" किंवा "prepare rescue plan" असे सांगू शकता.`;
-        } else if (activeLang === 'hi') {
+        } else if (activeLang === 'hi' || activeLang === 'hinglish') {
           exp = `### 🔍 जांच निष्कर्ष (Investigation Findings): **${pName}**\n\n`;
           exp += `• **स्वास्थ्य स्थिति (Health):** \`${hStatus}\`\n`;
           exp += `• **सक्रिय रुकावटें (Active Blockers):** ${blockers.length}\n`;
@@ -939,11 +1043,13 @@ export class AssistantOrchestrator {
       lower.includes('recommendation') ||
       lower.includes('prioritize') ||
       lower.includes('top priorit') ||
+      lower.includes('which task should i complete first') ||
+      lower.includes('complete first') ||
       normLower.includes('daily priorit') ||
       normLower.includes('what should i work on') ||
       classified.intent === 'DAILY_PRIORITIES'
     ) {
-      return this._workflowDailyPriorities();
+      return this._workflowDailyPriorities(text, activeLang);
     }
 
     // -------------------------------------------------------------
@@ -1122,6 +1228,30 @@ export class AssistantOrchestrator {
     }
 
     // -------------------------------------------------------------
+    // Workflow: Project Discovery (List Projects)
+    // e.g. "Show me all my projects.", "List my projects.", "What projects are registered?"
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'LIST_PROJECTS' ||
+      isProjectsListIntent(text) ||
+      isProjectsListIntent(normalizedText)
+    ) {
+      return this._workflowListProjects(text, activeLang);
+    }
+
+    // -------------------------------------------------------------
+    // Workflow: Project Health & Risk Assessment
+    // e.g. "Which project is at risk?", "Which project needs immediate attention?", "Identify unhealthy projects"
+    // -------------------------------------------------------------
+    if (
+      classified.intent === 'PROJECT_HEALTH' ||
+      isProjectHealthIntent(text) ||
+      isProjectHealthIntent(normalizedText)
+    ) {
+      return this._workflowProjectHealth(text, activeLang);
+    }
+
+    // -------------------------------------------------------------
     // Workflow 2: Project investigation
     // -------------------------------------------------------------
     if (
@@ -1224,14 +1354,34 @@ You can ask me to:
   // WORKFLOW IMPLEMENTATIONS
   // =============================================================
 
-  async _workflowDailyPriorities() {
+  async _workflowDailyPriorities(rawText = '', activeLang = 'en') {
     const toolCalls = [];
+    const lower = (rawText || '').toLowerCase();
+
+    let limit = 4;
+    let isTopOnly = false;
+    if (lower.includes('top three') || lower.includes('top 3') || lower.includes('three priorities')) {
+      limit = 3;
+    } else if (lower.includes('top two') || lower.includes('top 2') || lower.includes('two priorities')) {
+      limit = 2;
+    } else if (lower.includes('top five') || lower.includes('top 5') || lower.includes('five priorities')) {
+      limit = 5;
+    } else if (
+      lower.includes('complete first') ||
+      lower.includes('work on first') ||
+      lower.includes('first priority') ||
+      lower.includes('top priority') ||
+      lower.includes('start with')
+    ) {
+      isTopOnly = true;
+      limit = 3;
+    }
 
     // Step 1: Call get_priority_recommendations tool
-    const recsRes = await this.mcpClient.callTool('get_priority_recommendations', { limit: 4 });
+    const recsRes = await this.mcpClient.callTool('get_priority_recommendations', { limit });
     toolCalls.push({
       name: 'get_priority_recommendations',
-      args: { limit: 4 },
+      args: { limit },
       result: recsRes.data
     });
 
@@ -1246,35 +1396,328 @@ You can ask me to:
     const recs = recsRes.data?.recommendations || [];
     const blockerCount = blockersRes.data?.blockerCount || 0;
 
-    let explanation = `Here are your calculated daily priorities based on ${recsRes.data?.evaluatedTaskCount || 0} pending tasks:\n\n`;
+    let explanation = '';
+    const isMr = activeLang === 'mr' || activeLang === 'marathiglish';
+    const isHi = activeLang === 'hi' || activeLang === 'hinglish';
 
-    if (blockerCount > 0) {
-      explanation += `⚠️ **Attention:** There are **${blockerCount} active blocker(s)** in your projects that may require immediate unblocking.\n\n`;
-    }
-
-    if (recs.length === 0) {
-      explanation += 'No pending tasks found. All recorded work is currently marked as done!';
-    } else {
-      const executableTasks = recs.filter(r => r.executionReadiness === 'Ready');
-      if (executableTasks.length === 0) {
-        explanation += `⚠️ **Notice:** All recommended pending tasks are currently blocked. No executable tasks are immediately available; resolve active blockers first.\n\n`;
-      } else {
-        const topExecutable = executableTasks[0];
-        explanation += `🎯 **Immediate Focus:** Complete **${topExecutable.title}** (Project: *${topExecutable.projectName}*, Score: ${topExecutable.score} pts, Readiness: Ready)\n\n`;
+    if (isMr) {
+      explanation = `### 🎯 दैनंदिन प्राधान्यक्रम (Daily Priorities)\n\n` +
+        `एकूण ${recsRes.data?.evaluatedTaskCount || 0} प्रलंबित कामांमधून मोजलेले प्राधान्यक्रम:\n\n`;
+      if (blockerCount > 0) {
+        explanation += `⚠️ **सावधान:** तुमच्या प्रकल्पांमध्ये **${blockerCount} सक्रिय अडथळे** आहेत ज्यांचे त्वरित निवारण करणे आवश्यक आहे.\n\n`;
       }
+      if (recs.length === 0) {
+        explanation += 'सर्व नोंदवलेली कामे पूर्ण झाली आहेत! कोणतेही प्रलंबित काम नाही.';
+      } else {
+        const readyTasks = recs.filter(r => r.executionReadiness === 'Ready');
+        if (isTopOnly && readyTasks.length > 0) {
+          const top = readyTasks[0];
+          explanation += `🥇 **सर्वात आधी पूर्ण करावयाचे काम:** **${top.title}** (प्रकल्प: *${top.projectName}*, स्कोअर: ${top.score} pts)\n\n`;
+        }
+        recs.forEach((r, idx) => {
+          explanation += `**${idx + 1}. [${r.priority.toUpperCase()}] ${r.title}** (प्रकल्प: *${r.projectName}*)\n` +
+            `   • **स्कोअर:** ${r.score} pts | **स्थिती:** ${r.currentStatus} | **तयारी:** ${r.executionReadiness}\n` +
+            `   • **कारण:** ${r.reasons.join('; ')}\n\n`;
+        });
+      }
+    } else if (isHi) {
+      explanation = `### 🎯 दैनिक प्राथमिकताएं (Daily Priorities)\n\n` +
+        `कुल ${recsRes.data?.evaluatedTaskCount || 0} लंबित कार्यों के आधार पर परिकलित प्राथमिकताएं:\n\n`;
+      if (blockerCount > 0) {
+        explanation += `⚠️ **ध्यान दें:** आपकी परियोजनाओं में **${blockerCount} सक्रिय रुकावटें** हैं जिन्हें तुरंत हटाने की आवश्यकता है।\n\n`;
+      }
+      if (recs.length === 0) {
+        explanation += 'सभी कार्य पूरे हो चुके हैं! कोई लंबित कार्य शेष नहीं है।';
+      } else {
+        const readyTasks = recs.filter(r => r.executionReadiness === 'Ready');
+        if (isTopOnly && readyTasks.length > 0) {
+          const top = readyTasks[0];
+          explanation += `🥇 **सबसे पहले पूरा करने योग्य कार्य:** **${top.title}** (परियोजना: *${top.projectName}*, स्कोर: ${top.score} pts)\n\n`;
+        }
+        recs.forEach((r, idx) => {
+          explanation += `**${idx + 1}. [${r.priority.toUpperCase()}] ${r.title}** (परियोजना: *${r.projectName}*)\n` +
+            `   • **स्कोर:** ${r.score} pts | **स्थिति:** ${r.currentStatus} | **तैयारी:** ${r.executionReadiness}\n` +
+            `   • **कारण:** ${r.reasons.join('; ')}\n\n`;
+        });
+      }
+    } else {
+      explanation = `Here are your calculated daily priorities based on ${recsRes.data?.evaluatedTaskCount || 0} pending tasks:\n\n`;
+      if (blockerCount > 0) {
+        explanation += `⚠️ **Attention:** There are **${blockerCount} active blocker(s)** in your projects that may require immediate unblocking.\n\n`;
+      }
+      if (recs.length === 0) {
+        explanation += 'No pending tasks found. All recorded work is currently marked as done!';
+      } else {
+        const executableTasks = recs.filter(r => r.executionReadiness === 'Ready');
+        if (isTopOnly && executableTasks.length > 0) {
+          const topExecutable = executableTasks[0];
+          explanation += `🎯 **Top Recommendation to Complete First:** Complete **${topExecutable.title}** (Project: *${topExecutable.projectName}*, Score: ${topExecutable.score} pts, Readiness: Ready)\n\n`;
+        } else if (executableTasks.length === 0) {
+          explanation += `⚠️ **Notice:** All recommended pending tasks are currently blocked. No executable tasks are immediately available; resolve active blockers first.\n\n`;
+        } else {
+          const topExecutable = executableTasks[0];
+          explanation += `🎯 **Immediate Focus:** Complete **${topExecutable.title}** (Project: *${topExecutable.projectName}*, Score: ${topExecutable.score} pts, Readiness: Ready)\n\n`;
+        }
 
-      recs.forEach((r, idx) => {
-        explanation += `**${idx + 1}. [${r.priority.toUpperCase()}] ${r.title}** (Project: *${r.projectName}*)\n`;
-        explanation += `   • **Score:** ${r.score} pts | **Status:** ${r.currentStatus} | **Readiness:** ${r.executionReadiness}\n`;
-        explanation += `   • **Why prioritized:** ${r.reasons.join('; ')}\n\n`;
-      });
+        recs.forEach((r, idx) => {
+          explanation += `**${idx + 1}. [${r.priority.toUpperCase()}] ${r.title}** (Project: *${r.projectName}*)\n`;
+          explanation += `   • **Score:** ${r.score} pts | **Status:** ${r.currentStatus} | **Readiness:** ${r.executionReadiness}\n`;
+          explanation += `   • **Why prioritized:** ${r.reasons.join('; ')}\n\n`;
+        });
+      }
     }
 
     return {
       workflow: 'daily_priorities',
       toolCalls,
-      explanation
+      explanation: explanation.trim()
     };
+  }
+
+  async _workflowListProjects(rawText = '', activeLang = 'en') {
+    const toolCalls = [];
+    try {
+      const projectsRes = await this.mcpClient.callTool('list_projects', {});
+      toolCalls.push({
+        name: 'list_projects',
+        args: {},
+        result: projectsRes.data
+      });
+
+      const projects = projectsRes.data?.projects || [];
+      const isMr = activeLang === 'mr' || activeLang === 'marathiglish';
+      const isHi = activeLang === 'hi' || activeLang === 'hinglish';
+
+      if (projects.length === 0) {
+        let msg = 'No projects currently registered in the database.';
+        if (isMr) msg = 'डेटाबेसमध्ये कोणतेही नोंदणीकृत प्रकल्प आढळले नाहीत.';
+        if (isHi) msg = 'डेटाबेस में कोई पंजीकृत परियोजना नहीं मिली।';
+        return {
+          workflow: 'list_projects',
+          toolCalls,
+          explanation: msg
+        };
+      }
+
+      let explanation = '';
+      if (isMr) {
+        explanation = `### 📁 नोंदणीकृत प्रकल्प (${projects.length} आढळले)\n\nखालील सर्व प्रकल्प प्रणालीमध्ये नोंदणीकृत आहेत:\n\n`;
+        projects.forEach((p, idx) => {
+          const metrics = p.metrics || {};
+          explanation += `${idx + 1}. **${p.name}** (\`${p.id}\`) — *${p.category || 'general'}*\n` +
+            `   • **स्थिती:** \`${p.status}\` | **प्राधान्य:** \`${p.priority}\`\n` +
+            `   • **प्रगती:** ${metrics.progressPercent ?? 0}% (${metrics.completedTasks ?? 0}/${metrics.totalTasks ?? 0} कामे पूर्ण)\n` +
+            `   • **अडथळे:** ${metrics.blockedTasks > 0 ? `⚠️ ${metrics.blockedTasks} सक्रिय अडथळा(ळे)` : '✅ कोणताही अडथळा नाही'}\n\n`;
+        });
+        explanation += `*कोणत्याही प्रकल्पाचे सविस्तर विश्लेषण पाहण्यासाठी "Inspect <Project>" निवडा.*`;
+      } else if (isHi) {
+        explanation = `### 📁 पंजीकृत परियोजनाएं (${projects.length} मिली)\n\nप्रणाली में पंजीकृत सभी परियोजनाएं:\n\n`;
+        projects.forEach((p, idx) => {
+          const metrics = p.metrics || {};
+          explanation += `${idx + 1}. **${p.name}** (\`${p.id}\`) — *${p.category || 'general'}*\n` +
+            `   • **स्थिति:** \`${p.status}\` | **प्राथमिकता:** \`${p.priority}\`\n` +
+            `   • **प्रगति:** ${metrics.progressPercent ?? 0}% (${metrics.completedTasks ?? 0}/${metrics.totalTasks ?? 0} कार्य पूर्ण)\n` +
+            `   • **रुकावटें:** ${metrics.blockedTasks > 0 ? `⚠️ ${metrics.blockedTasks} सक्रिय रुकावट` : '✅ कोई रुकावट नहीं'}\n\n`;
+        });
+        explanation += `*किसी भी परियोजना का विस्तृत विश्लेषण देखने के लिए "Inspect <Project>" चुनें।*`;
+      } else {
+        explanation = `### 📁 Registered Projects (${projects.length} found)\n\nHere are all projects currently registered in the portfolio:\n\n`;
+        projects.forEach((p, idx) => {
+          const metrics = p.metrics || {};
+          explanation += `${idx + 1}. **${p.name}** (\`${p.id}\`) — *${p.category || 'general'}*\n` +
+            `   • **Status:** \`${p.status}\` | **Priority:** \`${p.priority}\`\n` +
+            `   • **Progress:** ${metrics.progressPercent ?? 0}% (${metrics.completedTasks ?? 0}/${metrics.totalTasks ?? 0} tasks completed)\n` +
+            `   • **Blockers:** ${metrics.blockedTasks > 0 ? `⚠️ **${metrics.blockedTasks} active blocker(s)**` : '✅ None'}\n\n`;
+        });
+        explanation += `*Tip: Click any project below or say "Investigate <project>" for in-depth metrics and health analysis.*`;
+      }
+
+      return {
+        workflow: 'list_projects',
+        toolCalls,
+        explanation: explanation.trim(),
+        clarificationOptions: projects.map(p => ({
+          label: `Inspect ${p.name}`,
+          action: `inspect ${p.id}`
+        }))
+      };
+    } catch (err) {
+      return {
+        workflow: 'list_projects',
+        toolCalls,
+        explanation: `⚠️ Failed to retrieve projects: ${err.message}`
+      };
+    }
+  }
+
+  async _workflowProjectHealth(rawText = '', activeLang = 'en') {
+    const toolCalls = [];
+    try {
+      const healthRes = await this.mcpClient.callTool('get_project_health', {});
+      toolCalls.push({
+        name: 'get_project_health',
+        args: {},
+        result: healthRes.data
+      });
+
+      const data = healthRes.data || {};
+      const projects = data.projects || [];
+      const aggregate = data.aggregate || {};
+
+      const atRiskProjects = projects.filter(p => p.healthStatus === 'At Risk');
+      const attentionProjects = projects.filter(p => p.healthStatus === 'Attention Needed');
+      const healthyProjects = projects.filter(p => p.healthStatus === 'Healthy');
+
+      const lower = rawText.toLowerCase();
+      const isAtRiskOnly = lower.includes('at risk') || lower.includes('at-risk') || lower.includes('in danger') || lower.includes('khatre') || lower.includes('dhokyat');
+      const isAttentionOnly = lower.includes('immediate attention') || lower.includes('needs attention') || lower.includes('dhyan') || lower.includes('laksha');
+
+      let explanation = '';
+      const isMr = activeLang === 'mr' || activeLang === 'marathiglish';
+      const isHi = activeLang === 'hi' || activeLang === 'hinglish';
+
+      if (isMr) {
+        if (isAtRiskOnly) {
+          explanation = `### 🚨 धोक्यात असलेले प्रकल्प (Projects At Risk)\n\n`;
+          if (atRiskProjects.length === 0) {
+            explanation += `✅ **सध्या कोणताही प्रकल्प धोक्यात (At Risk) नाही.**\n\n`;
+          } else {
+            explanation += `सत्यापित कार्य आणि अडथळा मेट्रिक्सनुसार खालील **${atRiskProjects.length} प्रकल्प धोक्यात** आहेत:\n\n`;
+            atRiskProjects.forEach((p, idx) => {
+              explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`)\n` +
+                `   • **आरोग्य दर्जा:** \`🚨 At Risk\` | **प्राधान्य:** \`${p.priority}\`\n` +
+                `   • **कारण आणि पुरावा (Evidence):**\n` +
+                (p.statusReasons || []).map(r => `     - ${r}`).join('\n') + '\n\n';
+            });
+            explanation += `**शिफारस:** या प्रकल्पासाठी त्वरित **"Prepare rescue plan"** सुरू करा.`;
+          }
+        } else if (isAttentionOnly) {
+          explanation = `### ⚠️ तातडीने लक्ष देण्याची गरज असलेले प्रकल्प\n\n`;
+          const targetProjects = [...atRiskProjects, ...attentionProjects];
+          if (targetProjects.length === 0) {
+            explanation += `✅ सर्व प्रकल्प सुरळीत सुरू आहेत.\n\n`;
+          } else {
+            targetProjects.forEach((p, idx) => {
+              const icon = p.healthStatus === 'At Risk' ? '🚨' : '⚠️';
+              explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`)\n` +
+                `   • **आरोग्य दर्जा:** \`${icon} ${p.healthStatus}\` | **प्राधान्य:** \`${p.priority}\`\n` +
+                `   • **कारण आणि पुरावा:**\n` +
+                (p.statusReasons || []).map(r => `     - ${r}`).join('\n') + '\n\n';
+            });
+          }
+        } else {
+          explanation = `### 📊 प्रकल्प आरोग्य मूल्यांकन अहवाल (Project Health Assessment)\n\n` +
+            `• एकूण प्रकल्प: **${aggregate.totalProjects || projects.length}** | सरासरी प्रगती: **${aggregate.overallCompletionRate ?? 0}%**\n` +
+            `• धोक्यात (At Risk): **${aggregate.statusDistribution?.atRisk ?? atRiskProjects.length}** | लक्ष हवे (Attention Needed): **${aggregate.statusDistribution?.attentionNeeded ?? attentionProjects.length}** | निरोगी (Healthy): **${aggregate.statusDistribution?.healthy ?? healthyProjects.length}**\n\n`;
+          projects.forEach((p, idx) => {
+            const icon = p.healthStatus === 'At Risk' ? '🚨' : (p.healthStatus === 'Attention Needed' ? '⚠️' : '✅');
+            explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`): \`${icon} ${p.healthStatus}\`\n` +
+              `   • पुरावा: ${(p.statusReasons || []).join('; ')}\n\n`;
+          });
+        }
+      } else if (isHi) {
+        if (isAtRiskOnly) {
+          explanation = `### 🚨 जोखिम में परियोजनाएं (Projects At Risk)\n\n`;
+          if (atRiskProjects.length === 0) {
+            explanation += `✅ **वर्तमान में कोई भी परियोजना जोखिम (At Risk) में नहीं है।**\n\n`;
+          } else {
+            explanation += `सत्यापित कार्य एवं रुकावट डेटा के आधार पर निम्नलिखित **${atRiskProjects.length} परियोजना जोखिम में** है:\n\n`;
+            atRiskProjects.forEach((p, idx) => {
+              explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`)\n` +
+                `   • **स्वास्थ्य स्थिति:** \`🚨 At Risk\` | **प्राथमिकता:** \`${p.priority}\`\n` +
+                `   • **सत्यापित साक्ष्य (Evidence):**\n` +
+                (p.statusReasons || []).map(r => `     - ${r}`).join('\n') + '\n\n';
+            });
+            explanation += `**अनुशंसा:** इस परियोजना के लिए तुरंत **"Prepare rescue plan"** चलाएं।`;
+          }
+        } else if (isAttentionOnly) {
+          explanation = `### ⚠️ तत्काल ध्यान देने योग्य परियोजनाएं\n\n`;
+          const targetProjects = [...atRiskProjects, ...attentionProjects];
+          if (targetProjects.length === 0) {
+            explanation += `✅ सभी परियोजनाएं सुचारू रूप से चल रही हैं।\n\n`;
+          } else {
+            targetProjects.forEach((p, idx) => {
+              const icon = p.healthStatus === 'At Risk' ? '🚨' : '⚠️';
+              explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`)\n` +
+                `   • **स्वास्थ्य स्थिति:** \`${icon} ${p.healthStatus}\` | **प्राथमिकता:** \`${p.priority}\`\n` +
+                `   • **कारण एवं साक्ष्य:**\n` +
+                (p.statusReasons || []).map(r => `     - ${r}`).join('\n') + '\n\n';
+            });
+          }
+        } else {
+          explanation = `### 📊 समग्र परियोजना स्वास्थ्य रिपोर्ट (Overall Project Health)\n\n` +
+            `• कुल परियोजनाएं: **${aggregate.totalProjects || projects.length}** | औसत पूर्णता: **${aggregate.overallCompletionRate ?? 0}%**\n` +
+            `• At Risk: **${aggregate.statusDistribution?.atRisk ?? atRiskProjects.length}** | Attention Needed: **${aggregate.statusDistribution?.attentionNeeded ?? attentionProjects.length}** | Healthy: **${aggregate.statusDistribution?.healthy ?? healthyProjects.length}**\n\n`;
+          projects.forEach((p, idx) => {
+            const icon = p.healthStatus === 'At Risk' ? '🚨' : (p.healthStatus === 'Attention Needed' ? '⚠️' : '✅');
+            explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`): \`${icon} ${p.healthStatus}\`\n` +
+              `   • साक्ष्य: ${(p.statusReasons || []).join('; ')}\n\n`;
+          });
+        }
+      } else {
+        // English
+        if (isAtRiskOnly) {
+          explanation = `### 🚨 Projects At Risk\n\n`;
+          if (atRiskProjects.length === 0) {
+            explanation += `✅ **No projects are currently classified as At Risk.** All projects are meeting stability thresholds.\n\n`;
+          } else {
+            explanation += `Based on real-time task completion, active blockers, and bug severity, the following project(s) are classified as **At Risk**:\n\n`;
+            atRiskProjects.forEach((p, idx) => {
+              explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`)\n` +
+                `   • **Health Status:** \`🚨 At Risk\` | **Priority:** \`${p.priority.toUpperCase()}\`\n` +
+                `   • **Verified Evidence:**\n` +
+                (p.statusReasons || []).map(r => `     - ${r}`).join('\n') + '\n\n';
+            });
+            explanation += `💡 **Recommended Next Step:** Click **Rescue ${atRiskProjects[0].projectName}** below or say "Prepare a rescue plan for ${atRiskProjects[0].projectName}".`;
+          }
+        } else if (isAttentionOnly) {
+          explanation = `### ⚠️ Projects Requiring Immediate Attention\n\n`;
+          const targetProjects = [...atRiskProjects, ...attentionProjects];
+          if (targetProjects.length === 0) {
+            explanation += `✅ **All projects are healthy.** No immediate interventions required.\n\n`;
+          } else {
+            explanation += `The following projects require immediate managerial intervention due to blockers, overdue deadlines, or low completion rates:\n\n`;
+            targetProjects.forEach((p, idx) => {
+              const icon = p.healthStatus === 'At Risk' ? '🚨' : '⚠️';
+              explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`)\n` +
+                `   • **Health Classification:** \`${icon} ${p.healthStatus}\` | **Priority:** \`${p.priority.toUpperCase()}\`\n` +
+                `   • **Key Factors:**\n` +
+                (p.statusReasons || []).map(r => `     - ${r}`).join('\n') + '\n\n';
+            });
+          }
+        } else {
+          explanation = `### 📊 Portfolio Health Assessment\n\n` +
+            `• **Total Projects:** ${aggregate.totalProjects || projects.length} | **Portfolio Completion:** ${aggregate.overallCompletionRate ?? 0}%\n` +
+            `• **Health Distribution:** 🚨 At Risk: **${aggregate.statusDistribution?.atRisk ?? atRiskProjects.length}** | ⚠️ Attention Needed: **${aggregate.statusDistribution?.attentionNeeded ?? attentionProjects.length}** | ✅ Healthy: **${aggregate.statusDistribution?.healthy ?? healthyProjects.length}**\n\n`;
+          projects.forEach((p, idx) => {
+            const icon = p.healthStatus === 'At Risk' ? '🚨' : (p.healthStatus === 'Attention Needed' ? '⚠️' : '✅');
+            explanation += `${idx + 1}. **${p.projectName}** (\`${p.projectId}\`): \`${icon} ${p.healthStatus}\`\n` +
+              `   • **Evidence:** ${(p.statusReasons || []).join('; ')}\n\n`;
+          });
+        }
+      }
+
+      const options = [];
+      atRiskProjects.forEach(p => {
+        options.push({ label: `Rescue ${p.projectName}`, action: `rescue project ${p.projectId}` });
+      });
+      projects.forEach(p => {
+        options.push({ label: `Inspect ${p.projectName}`, action: `inspect ${p.projectId}` });
+      });
+
+      return {
+        workflow: 'project_health',
+        toolCalls,
+        explanation: explanation.trim(),
+        clarificationOptions: options.slice(0, 4)
+      };
+    } catch (err) {
+      return {
+        workflow: 'project_health',
+        toolCalls,
+        explanation: `⚠️ Failed to retrieve project health: ${err.message}`
+      };
+    }
   }
 
   _workflowSwitchLanguage(targetLang = 'en') {
@@ -1480,7 +1923,7 @@ You can ask me to:
 
     const projects = projectsRes.data?.projects || [];
     const langInfo = this.languageDetector.detect(rawText, this.memory.preferredLanguage);
-    const lang = preferredLang || (langInfo.language !== 'en' ? langInfo.language : this.memory.preferredLanguage) || 'en';
+    const lang = preferredLang || (langInfo.confidence >= 0.75 ? langInfo.language : this.memory.preferredLanguage) || 'en';
 
     // Resolve project using the multi-tier deterministic matching engine
     let resolution = resolveProject(rawText, projects);
@@ -1497,33 +1940,34 @@ You can ask me to:
     if (resolution.status === 'empty') {
       if (lang === 'mr' || lang === 'marathiglish') {
         const projectListStr = projects.length > 0
-          ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
+          ? projects.map(p => `• **${p.name}** (${p.category || 'general'}) - Status: \`${p.status}\`, Progress: ${p.metrics?.progressPercent ?? 0}%`).join('\n')
           : 'कोणतेही प्रोजेक्ट्स उपलब्ध नाहीत.';
         return {
           workflow: 'project_investigation',
           toolCalls,
-          explanation: `कृपया तपासणीसाठी प्रोजेक्टचे नाव सांगा.\n\nउपलब्ध प्रोजेक्ट्स:\n${projectListStr}`,
+          explanation: `कृपया तपासणीसाठी प्रोजेक्टचे नाव सांगा.\n\nउपलब्ध प्रोजेक्ट्स (Available projects):\n${projectListStr}`,
           clarificationOptions: projects.map(p => ({ label: `${p.name} (${p.category})`, action: p.id }))
         };
       }
       if (lang === 'hi' || lang === 'hinglish') {
         const projectListStr = projects.length > 0
-          ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
+          ? projects.map(p => `• **${p.name}** (${p.category || 'general'}) - Status: \`${p.status}\`, Progress: ${p.metrics?.progressPercent ?? 0}%`).join('\n')
           : 'कोई प्रोजेक्ट उपलब्ध नहीं है।';
         return {
           workflow: 'project_investigation',
           toolCalls,
-          explanation: `कृपया जाँच के लिए प्रोजेक्ट का नाम बताएं।\n\nउपलब्ध प्रोजेक्ट्स:\n${projectListStr}`,
+          explanation: `कृपया जाँच के लिए प्रोजेक्ट का नाम बताएं।\n\nउपलब्ध प्रोजेक्ट्स (Available projects):\n${projectListStr}`,
           clarificationOptions: projects.map(p => ({ label: `${p.name} (${p.category})`, action: p.id }))
         };
       }
       const projectListStr = projects.length > 0
-        ? projects.map(p => `• **${p.name}** (${p.category})`).join('\n')
+        ? projects.map(p => `• **${p.name}** (${p.category || 'general'}) - Status: \`${p.status}\`, Progress: ${p.metrics?.progressPercent ?? 0}%`).join('\n')
         : 'No projects currently registered.';
       return {
         workflow: 'project_investigation',
         toolCalls,
-        explanation: `Please specify a project name to investigate.\n\nAvailable projects:\n${projectListStr}`
+        explanation: `Please specify a project name to investigate.\n\nAvailable projects:\n${projectListStr}`,
+        clarificationOptions: projects.map(p => ({ label: `Inspect ${p.name}`, action: `inspect ${p.id}` }))
       };
     }
 
@@ -1999,28 +2443,70 @@ You can ask me to:
       });
 
       const blockers = blockersRes.data?.blockers || [];
+      const isMr = activeLang === 'mr' || activeLang === 'marathiglish';
+      const isHi = activeLang === 'hi' || activeLang === 'hinglish';
 
       if (blockers.length === 0) {
+        let msg = `✅ **No Active Blockers Found**\n\nAll tasks across all projects are free of reported impediments.`;
+        if (isMr) msg = `✅ **कोणतेही सक्रिय अडथळे आढळले नाहीत**\n\nसर्व प्रकल्पांमधील कामे सुरळीत सुरू आहेत.`;
+        if (isHi) msg = `✅ **कोई सक्रिय रुकावट नहीं मिली**\n\nसभी परियोजनाओं के कार्य बिना किसी बाधा के प्रगति पर हैं।`;
         return {
           workflow: 'blocker_review',
           toolCalls,
-          explanation: `✅ **No Active Blockers Found**\n\nAll tasks across all projects are free of reported impediments.`
+          explanation: msg
         };
       }
 
-      let explanation = `### 🛑 Active Blocked Tasks (${blockers.length} identified)\n\n`;
-      blockers.forEach((b, index) => {
-        const title = b.taskTitle || b.title || 'Untitled Task';
-        const id = b.taskId || b.id || 'N/A';
-        const project = b.projectName || b.projectId || 'Unknown Project';
-        const priority = (b.priority || 'medium').toUpperCase();
-        const reason = b.blockerReason || b.blocker || 'Status set to blocked without explicit detail';
+      let explanation = '';
+      if (isMr) {
+        explanation = `### 🛑 प्रगती रोखणारे सक्रिय अडथळे (${blockers.length} आढळले)\n\n` +
+          `खालील कामे सध्या अडकलेली आहेत आणि प्रकल्पांची प्रगती थांबवत आहेत:\n\n`;
+        blockers.forEach((b, index) => {
+          const title = b.taskTitle || b.title || 'काम';
+          const id = b.taskId || b.id || 'N/A';
+          const project = b.projectName || b.projectId || 'प्रकल्प';
+          const priority = (b.priority || 'medium').toUpperCase();
+          const reason = b.blockerReason || b.blocker || 'अडथळा नोंदवला आहे';
 
-        explanation += `${index + 1}. **${title}** (\`${id}\`)\n` +
-          `   • **Project:** ${project}\n` +
-          `   • **Priority Rating:** ${priority}\n` +
-          `   • **Blocker Reason:** ${reason}\n\n`;
-      });
+          explanation += `${index + 1}. **${title}** (\`${id}\`)\n` +
+            `   • **प्रकल्प:** ${project}\n` +
+            `   • **प्राधान्य:** ${priority}\n` +
+            `   • **अडथळ्याचे कारण:** ${reason}\n\n`;
+        });
+        explanation += `*हा अडथळा दूर करण्यासाठी "resolve blocker <task-id>" किंवा "prepare rescue plan" वापरा.*`;
+      } else if (isHi) {
+        explanation = `### 🛑 प्रगति रोकने वाली सक्रिय रुकावटें (${blockers.length} मिली)\n\n` +
+          `निम्नलिखित कार्य अवरुद्ध हैं और परियोजना की प्रगति में बाधा उत्पन्न कर रहे हैं:\n\n`;
+        blockers.forEach((b, index) => {
+          const title = b.taskTitle || b.title || 'कार्य';
+          const id = b.taskId || b.id || 'N/A';
+          const project = b.projectName || b.projectId || 'परियोजना';
+          const priority = (b.priority || 'medium').toUpperCase();
+          const reason = b.blockerReason || b.blocker || 'रुकावट दर्ज है';
+
+          explanation += `${index + 1}. **${title}** (\`${id}\`)\n` +
+            `   • **परियोजना:** ${project}\n` +
+            `   • **प्राथमिकता:** ${priority}\n` +
+            `   • **रुकावट का कारण:** ${reason}\n\n`;
+        });
+        explanation += `*रुकावट हटाने के लिए "resolve blocker <task-id>" कहें।*`;
+      } else {
+        explanation = `### 🛑 Active Blocked Tasks (${blockers.length} identified)\n\n` +
+          `The following tasks are currently blocked and preventing project progress:\n\n`;
+        blockers.forEach((b, index) => {
+          const title = b.taskTitle || b.title || 'Untitled Task';
+          const id = b.taskId || b.id || 'N/A';
+          const project = b.projectName || b.projectId || 'Unknown Project';
+          const priority = (b.priority || 'medium').toUpperCase();
+          const reason = b.blockerReason || b.blocker || 'Status set to blocked without explicit detail';
+
+          explanation += `${index + 1}. **${title}** (\`${id}\`)\n` +
+            `   • **Project:** ${project}\n` +
+            `   • **Priority Rating:** ${priority}\n` +
+            `   • **Blocker Reason:** ${reason}\n\n`;
+        });
+        explanation += `💡 *To unblock, use "resolve blocker <task-id>" or say "prepare rescue plan for <project>".*`;
+      }
 
       return {
         workflow: 'blocker_review',
@@ -2284,6 +2770,42 @@ You can ask me to:
       };
     }
 
+    const normRescue = normalizeIntentText(rawText);
+
+    // Case 1: Diagnostic question - "Which project needs a rescue plan?"
+    if (
+      normRescue.includes('which project needs') ||
+      normRescue.includes('which project need') ||
+      normRescue.includes('what project needs') ||
+      normRescue.includes('who needs a rescue')
+    ) {
+      this.rescueState = RESCUE_STATES.IDLE;
+      const healthRes = await this.mcpClient.callTool('get_project_health', {});
+      toolCalls.push({
+        name: 'get_project_health',
+        args: {},
+        result: healthRes.data
+      });
+      const atRisk = (healthRes.data?.projects || []).filter(p => p.healthStatus === 'At Risk');
+      if (atRisk.length > 0) {
+        const top = atRisk[0];
+        let exp = `### 🚨 Project Requiring a Rescue Plan: **${top.projectName}**\n\n` +
+          `Based on deterministic task and blocker evaluation, **${top.projectName}** (\`${top.projectId}\`) is currently classified as **At Risk**.\n\n` +
+          `• **Priority:** \`${top.priority.toUpperCase()}\`\n` +
+          `• **Evidence for Rescue Need:**\n` +
+          (top.statusReasons || []).map(r => `  - ${r}`).join('\n') + '\n\n' +
+          `Click **Generate Rescue Plan** below to create a structured recovery strategy.`;
+        return {
+          workflow: 'rescue_plan_recommendation',
+          toolCalls,
+          explanation: exp,
+          clarificationOptions: [
+            { label: `Rescue ${top.projectName}`, action: `rescue project ${top.projectId}` }
+          ]
+        };
+      }
+    }
+
     this.rescueState = RESCUE_STATES.GENERATING_PLAN;
 
     // Step 1: Retrieve live projects to resolve target project
@@ -2296,7 +2818,38 @@ You can ask me to:
 
     const projects = projectsRes.data?.projects || [];
     const extractedQuery = extractRescueQuery(rawText);
-    const resolution = resolveProject(extractedQuery, projects);
+    let resolution = resolveProject(extractedQuery, projects);
+
+    // Case 2: Generic request without explicit project name (e.g. "Generate a rescue plan", "Prepare a recovery strategy for my most critical project")
+    if (resolution.status === 'empty') {
+      let autoTarget = null;
+      if (this.memory.activeProject) {
+        autoTarget = projects.find(p => p.id === this.memory.activeProject.id);
+      }
+      if (!autoTarget) {
+        const healthRes = await this.mcpClient.callTool('get_project_health', {});
+        toolCalls.push({
+          name: 'get_project_health',
+          args: {},
+          result: healthRes.data
+        });
+        const candidateProjects = healthRes.data?.projects || [];
+        const atRisk = candidateProjects.filter(p => p.healthStatus === 'At Risk');
+        if (atRisk.length > 0) {
+          atRisk.sort((a, b) => (b.priority === 'critical' ? 1 : 0) - (a.priority === 'critical' ? 1 : 0));
+          autoTarget = projects.find(p => p.id === atRisk[0].projectId);
+        } else {
+          const attention = candidateProjects.filter(p => p.healthStatus === 'Attention Needed');
+          if (attention.length > 0) {
+            autoTarget = projects.find(p => p.id === attention[0].projectId);
+          }
+        }
+      }
+
+      if (autoTarget) {
+        resolution = { status: 'matched', project: autoTarget, matchedBy: 'health_risk_auto_target' };
+      }
+    }
 
     if (resolution.status === 'empty') {
       this.rescueState = RESCUE_STATES.IDLE;
@@ -2388,7 +2941,10 @@ You can ask me to:
     this.selectedActionIds = new Set((plan.actions || []).map(a => a.id));
     this.rescueState = RESCUE_STATES.AWAITING_APPROVAL;
 
-    const explanation = this._buildRescueMarkdownSummary(plan);
+    let explanation = this._buildRescueMarkdownSummary(plan);
+    if (resolution.matchedBy === 'health_risk_auto_target') {
+      explanation = `*Targeting **${targetProject.name}** as the highest-priority project currently at risk.*\n\n` + explanation;
+    }
     const cardHtml = this._buildRescueApprovalCard(plan, this.selectedActionIds);
 
     return {

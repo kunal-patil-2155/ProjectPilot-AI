@@ -5,6 +5,8 @@
  */
 
 export const INTENTS = {
+  LIST_PROJECTS: 'LIST_PROJECTS',
+  PROJECT_HEALTH: 'PROJECT_HEALTH',
   INVESTIGATE_PROJECT: 'INVESTIGATE_PROJECT',
   REMAINING_WORK: 'REMAINING_WORK',
   DAILY_PRIORITIES: 'DAILY_PRIORITIES',
@@ -204,9 +206,16 @@ export class IntentClassifier {
       lower.startsWith('help rescue') ||
       lower.includes('rescue plan') ||
       lower.includes('recovery plan') ||
+      lower.includes('recovery strategy') ||
+      lower.includes('rescue strategy') ||
       lower.includes('rescue project') ||
+      lower.includes('needs a rescue plan') ||
+      lower.includes('need a rescue plan') ||
+      lower.includes('needs rescue') ||
+      lower.includes('need rescue') ||
       lower.includes('bachao project') ||
-      lower.includes('rescue kara')
+      lower.includes('rescue kara') ||
+      (lower.includes('recovery') && (lower.includes('critical') || lower.includes('project')))
     ) {
       return {
         intent: INTENTS.RESCUE_PROJECT,
@@ -326,6 +335,116 @@ export class IntentClassifier {
       };
     }
 
+    // 7.4 Project Health & Risk Analysis Intent (English / Hindi / Marathi)
+    if (
+      lower.includes('at risk') ||
+      lower.includes('in risk') ||
+      lower.includes('needs immediate attention') ||
+      lower.includes('need immediate attention') ||
+      lower.includes('needs attention') ||
+      lower.includes('attention needed') ||
+      lower.includes('unhealthy project') ||
+      lower.includes('unhealthy projects') ||
+      lower.includes('identify unhealthy') ||
+      lower.includes('which project is at risk') ||
+      lower.includes('which project needs') ||
+      lower.includes('which projects are at risk') ||
+      lower.includes('what projects are at risk') ||
+      lower.includes('projects at risk') ||
+      lower.includes('project at risk') ||
+      lower.includes('is at risk') ||
+      lower.includes('are at risk') ||
+      lower.includes('health status') ||
+      lower.includes('health rating') ||
+      lower.includes('health report') ||
+      lower.includes('show project health') ||
+      lower.includes('show health') ||
+      lower.includes('check project health') ||
+      lower.includes('project health overview') ||
+      lower.includes('overall project health') ||
+      lower.includes('health of all projects') ||
+      lower.includes('health of my projects') ||
+      lower.includes('health of projects') ||
+      lower.includes('failing project') ||
+      lower.includes('risk me hai') ||
+      lower.includes('khatre me') ||
+      lower.includes('dhokyat') ||
+      lower.includes('risk madhe aahe') ||
+      lower.includes('unhealthy projects batao') ||
+      lower.includes('unhealthy projects sanga')
+    ) {
+      return {
+        intent: INTENTS.PROJECT_HEALTH,
+        targetProject: this._extractProjectQuery(lower),
+        targetTask: null,
+        targetRepo: null,
+        actionType: 'get_project_health',
+        requiresClarification: false,
+        clarificationReason: null,
+        confidence: 0.95
+      };
+    }
+
+    // 7.5 Project Discovery & Listing Intent (English / Hindi / Marathi)
+    if (
+      !lower.includes('blocker') &&
+      !lower.includes('blocked') &&
+      !lower.includes('overdue') &&
+      !lower.includes('task') &&
+      (
+        lower === 'projects' ||
+        lower === 'all projects' ||
+        lower === 'list projects' ||
+        lower === 'show projects' ||
+        lower === 'my projects' ||
+        lower.includes('all my projects') ||
+        lower.includes('all projects') ||
+        lower.includes('list my projects') ||
+        lower.includes('list all projects') ||
+        lower.includes('list of projects') ||
+        lower.includes('show all projects') ||
+        lower.includes('show my projects') ||
+        lower.includes('show me all my projects') ||
+        lower.includes('show me projects') ||
+        lower.includes('show me my projects') ||
+        lower.includes('what projects are registered') ||
+        lower.includes('what projects do i have') ||
+        lower.includes('what are my projects') ||
+        lower.includes('which projects exist') ||
+        lower.includes('which projects are registered') ||
+        lower.includes('which projects do we have') ||
+        lower.includes('projects are registered') ||
+        lower.includes('registered projects') ||
+        lower.includes('projects list') ||
+        lower.includes('overview of my projects') ||
+        lower.includes('overview of projects') ||
+        lower.includes('mere sabhi projects') ||
+        lower.includes('sare projects') ||
+        lower.includes('sab projects') ||
+        lower.includes('projects ki list') ||
+        lower.includes('projects dikhao') ||
+        lower.includes('kaunse projects hain') ||
+        lower.includes('majhe sarva projects') ||
+        lower.includes('sarv projects') ||
+        lower.includes('sagale projects') ||
+        lower.includes('projects chi list') ||
+        lower.includes('projects dakva') ||
+        lower.includes('projects dakhva') ||
+        lower.includes('konte projects aahet')
+      )
+    ) {
+      return {
+        intent: INTENTS.LIST_PROJECTS,
+        targetProject: null,
+        targetTask: null,
+        targetRepo: null,
+        actionType: 'list_projects',
+        requiresClarification: false,
+        clarificationReason: null,
+        confidence: 0.96
+      };
+    }
+
     // 8. Daily Priorities Intent (English / Hindi / Marathi)
     if (
       lower.includes('daily priorit') ||
@@ -334,6 +453,17 @@ export class IntentClassifier {
       lower.includes('recommendation') ||
       lower.includes('prioritize') ||
       lower.includes('top priorit') ||
+      lower.includes('top three priorit') ||
+      lower.includes('top 3 priorit') ||
+      lower.includes('three priorit') ||
+      lower.includes('3 priorit') ||
+      lower.includes('complete first') ||
+      lower.includes('do first') ||
+      lower.includes('work on first') ||
+      lower.includes('start with') ||
+      lower.includes('highest priority') ||
+      lower.includes('which task should i complete first') ||
+      lower.includes('which task should i do first') ||
       lower.includes('aaj kay karu') ||
       lower.includes('aaj kya karna hai') ||
       lower.includes('aaj kya karu') ||
@@ -471,27 +601,16 @@ export class IntentClassifier {
       !lower.includes('resolve the blocker') &&
       !lower.startsWith('block task') &&
       (
-        lower.includes('blocked task') ||
-        lower.includes('blocked work') ||
-        lower.includes('blocked item') ||
-        lower.includes('all blocker') ||
-        lower.includes('all blocked') ||
-        lower.includes('list blocker') ||
-        lower.includes('show blocker') ||
-        lower.includes('which tasks are blocked') ||
-        lower.includes('tasks are blocked') ||
-        lower.includes('tasks blocked') ||
-        lower.includes('task is blocked') ||
-        lower.includes('find all blocked') ||
-        lower.includes('find blocked') ||
-        lower.includes('blockers across') ||
-        lower.includes('check blocked') ||
-        lower.includes('show blocked') ||
-        lower.includes('are there any blocked') ||
-        lower.includes('any blocked tasks') ||
-        lower.includes('any blockers') ||
-        lower === 'blockers' ||
-        lower === 'blocked tasks'
+        lower.includes('blocker') ||
+        lower.includes('blocked') ||
+        lower.includes('preventing project progress') ||
+        lower.includes('preventing progress') ||
+        (lower.includes('preventing') && lower.includes('progress')) ||
+        lower.includes('blocking') ||
+        lower.includes('impediment') ||
+        lower.includes('rukavat') ||
+        lower.includes('adthala') ||
+        lower.includes('adkalan')
       )
     ) {
       return {
@@ -651,9 +770,11 @@ export class IntentClassifier {
   _extractProjectQuery(lowerText) {
     // Strips common investigative filler words across English, Hindi, and Marathi
     return lowerText
-      .replace(/^(?:investigate|inspect|audit|examine|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|tell\s+me\s+about|give\s+me(?:\s+details)?|तपासा|तपासणी|जांच(?:\s+करो)?)\s+/i, '')
-      .replace(/^(?:the\s+|my\s+|our\s+|this\s+|mera\s+|meri\s+|majha\s+|majhi\s+|majhe\s+)?(?:project\s+|app\s+)?/i, '')
-      .replace(/\s+(?:status|health|details|doing|please|slow\s+chal\s+raha\s+hai|not\s+running\s+properly|not\s+working|error\s+ka\s+yetoy|open\s+hot\s+nahi|ka\s+status\s+batao|check\s+karo|तपासा|तपासणी|तपासावे|जांच|जांचो)$/i, '')
+      .replace(/^(?:investigate|inspect|audit|examine|check(?:\s+out)?|show(?:\s+me)?|what\s+is|what's|how\s+is|tell\s+me\s+about|give\s+me(?:\s+details|\s+a|\s+the)?|तपासा|तपासणी|जांच(?:\s+करो)?)\s+/i, '')
+      .replace(/^(?:a\s+)?(?:complete\s+)?(?:project\s+)?(?:status\s+)?(?:report)?\s*/i, '')
+      .replace(/^(?:how\s+is\s+)?(?:the\s+|my\s+|our\s+|this\s+|mera\s+|meri\s+|majha\s+|majhi\s+|majhe\s+)?(?:project\s+|app\s+)?/i, '')
+      .replace(/\s+(?:status|health|details|doing|progressing|please|slow\s+chal\s+raha\s+hai|not\s+running\s+properly|not\s+working|error\s+ka\s+yetoy|open\s+hot\s+nahi|ka\s+status\s+batao|check\s+karo|तपासा|तपासणी|तपासावे|जांच|जांचो)$/i, '')
+      .replace(/^(?:all\s+my\s+projects|all\s+projects|my\s+projects|active\s+blockers|the\s+active\s+blockers|rescue\s+plan|generate\s+a\s+rescue\s+plan|recovery\s+strategy|critical\s+project)$/i, '')
       .trim();
   }
 

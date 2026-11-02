@@ -22,6 +22,25 @@ export const MUTATING_TOOL_NAMES = new Set([
   'manage_blocker'
 ]);
 
+export const DEMO_ALLOWED_MUTATIONS = new Set([
+  'update_task_status',
+  'update_project'
+]);
+
+export const ADMINISTRATIVE_MUTATING_TOOLS = new Set([
+  'create_project',
+  'create_task',
+  'delete_project',
+  'delete_task',
+  'reopen_task',
+  'manage_blocker'
+]);
+
+export const DESTRUCTIVE_TOOL_NAMES = new Set([
+  'delete_project',
+  'delete_task'
+]);
+
 /**
  * Creates and configures an McpServer instance with all tools.
  * @param {import('../db/store.js').ProjectStore} store
@@ -39,6 +58,10 @@ export function createProjectPilotMcpServer(store, options = {}) {
 
   function verifyMutationAuth(toolName) {
     if (isProduction) {
+      if (options.isDemo && DEMO_ALLOWED_MUTATIONS.has(toolName)) {
+        // Safe mutation permitted in Judge Demo Mode against isolated DemoSandboxStore
+        return;
+      }
       if (options.authenticated === false) {
         throw new Error(`Authentication required: Mutating operation '${toolName}' forbidden in production without valid credentials.`);
       }

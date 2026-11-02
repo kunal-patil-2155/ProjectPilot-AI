@@ -60,20 +60,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Initializing MCP Streamable HTTP session...', 'info');
     await state.mcpClient.connect();
     showToast('MCP Connected (Streamable HTTP 2025-11-25)', 'success');
+
+    const demoBadge = document.getElementById('judgeDemoBadge');
+    if (!state.mcpClient.hasApiKey()) {
+      if (demoBadge) demoBadge.style.display = 'inline-flex';
+      setAuthStatus('demo', 'Judge Demo Mode is active. Safe mutations execute in an isolated in-memory sandbox. Configure Master API Key in Settings to unlock persistent production writes.');
+    } else {
+      if (demoBadge) demoBadge.style.display = 'none';
+      setAuthStatus('connected', 'Connected and authenticated with Master API Key.');
+    }
+
     await refreshAllData();
   } catch (err) {
-    if (err.message && err.message.includes('401')) {
-      setAuthStatus('auth_failed', 'Authentication required by MCP Gateway (HTTP 401).');
-      showToast('Authentication required by MCP server. Please configure your API key in Developer Settings.', 'warning');
-      const settingsModal = document.getElementById('settingsModal');
-      if (settingsModal) {
-        updateSettingsModalUi();
-        settingsModal.showModal();
-      }
-      return;
-    }
     console.error('Initial MCP connection error:', err);
-    showToast(`MCP Connection Error: ${err.message}`, 'error');
+    showToast(`MCP Connection Notice: ${err.message}`, 'warning');
   }
 });
 
@@ -697,6 +697,10 @@ function updateSettingsModalUi() {
         badge.className = 'badge badge-info';
         badge.textContent = 'Configured (In-Memory)';
         break;
+      case 'demo':
+        badge.className = 'badge badge-info';
+        badge.textContent = 'Judge Demo Mode (Sandboxed)';
+        break;
       case 'auth_failed':
         badge.className = 'badge badge-danger';
         badge.textContent = 'Authentication failed (HTTP 401)';
@@ -802,8 +806,11 @@ function setupDeveloperSettingsModal() {
       const errBox = document.getElementById('settingsErrorMessage');
       if (errBox) errBox.style.display = 'none';
 
-      setAuthStatus('not_configured', 'API key cleared from memory. Read-only mode active.');
-      showToast('API key removed from session memory.', 'info');
+      const demoBadge = document.getElementById('judgeDemoBadge');
+      if (demoBadge) demoBadge.style.display = 'inline-flex';
+
+      setAuthStatus('demo', 'API key cleared from memory. Judge Demo Mode active.');
+      showToast('API key removed from session memory. Operating in Judge Demo Mode.', 'info');
     });
   }
 
@@ -837,7 +844,9 @@ function setupDeveloperSettingsModal() {
       // 3. Test verification against MCP endpoint
       try {
         await state.mcpClient.connect();
-        setAuthStatus('connected', 'Connected and authenticated with MCP Gateway.');
+        const demoBadge = document.getElementById('judgeDemoBadge');
+        if (demoBadge) demoBadge.style.display = 'none';
+        setAuthStatus('connected', 'Connected and authenticated with Master API Key.');
         showToast('API key verified and applied to session memory!', 'success');
         await refreshAllData();
         settingsModal.close();

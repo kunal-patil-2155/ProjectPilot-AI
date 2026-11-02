@@ -322,6 +322,34 @@ code {
   border-left: 1px solid var(--border-subtle);
 }
 
+/* Judge Demo Mode Badge */
+.judge-demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background-color: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #c4b5fd;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.demo-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #a78bfa;
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.7);
+}
+
+.demo-badge-text {
+  letter-spacing: 0.02em;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
